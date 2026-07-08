@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>협객의 길 - 무림 선택 RPG</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@400;700&display=swap');
+        body { font-family: 'Noto Sans KR', system-ui, sans-serif; }
+        .murim-bg { background: linear-gradient(135deg, #1c1917 0%, #292524 100%); }
+        .section-card { background: #292524; border: 1px solid #57534e; border-radius: 1rem; }
+        .event-card { background: #1c1917; border: 2px solid #854d0e; }
+        .sd-placeholder {
+            width: 80px; height: 80px;
+            background: linear-gradient(135deg, #57534e, #44403c);
+            border: 4px solid #ca8a04;
+            border-radius: 9999px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2.5rem; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3);
+            flex-shrink: 0;
+        }
+        .choice-btn { transition: transform 0.15s, background 0.15s; }
+        .choice-btn:hover { transform: translateY(-2px); }
+        .hp-bar { height: 8px; border-radius: 4px; background: #3f3f46; overflow: hidden; }
+        .hp-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+        .hp-fill-player { background: linear-gradient(90deg, #dc2626, #ef4444); }
+        .hp-fill-enemy { background: linear-gradient(90deg, #7c2d12, #ea580c); }
+        .ng-fill { background: linear-gradient(90deg, #1d4ed8, #3b82f6); }
+
+        /* Node Map */
+        #node-map-wrap {
+            background: radial-gradient(ellipse at center, #1a2e1a 0%, #1c1917 70%);
+            border-radius: 12px;
+            border: 2px solid #44403c;
+            min-height: 280px;
+            position: relative;
+        }
+        .node-svg { width: 100%; height: 280px; display: block; }
+        .map-edge { stroke: #52525b; stroke-width: 0.6; stroke-dasharray: 2 1; }
+        .map-edge-active { stroke: #86efac; stroke-width: 0.9; stroke-dasharray: none; opacity: 0.9; }
+        .map-edge-days {
+            font-size: 2.8px; fill: #86efac; text-anchor: middle;
+            font-weight: 700; pointer-events: none;
+        }
+        .map-node { cursor: default; }
+        .map-node-reachable { cursor: pointer; }
+        .map-node-reachable:hover .map-node-bg { fill: #3f6212; stroke: #86efac; }
+        .map-node-bg { fill: #3f3f46; stroke: #57534e; stroke-width: 0.4; }
+        .map-node-current .map-node-bg { fill: #92400e; stroke: #fbbf24; stroke-width: 0.7; }
+        .map-node-reachable .map-node-bg { fill: #1e3a2f; stroke: #4ade80; stroke-width: 0.5; }
+        .map-node-fog .map-node-bg { fill: #27272a; stroke: #3f3f46; opacity: 0.6; }
+        .map-node-ring { fill: none; stroke: #fbbf24; stroke-width: 0.4; opacity: 0.6;
+            animation: pulse-ring 2s infinite; }
+        @keyframes pulse-ring {
+            0%, 100% { r: 7; opacity: 0.6; }
+            50% { r: 8; opacity: 0.3; }
+        }
+        .map-node-icon { font-size: 5px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+        .map-node-label { font-size: 3.2px; fill: #e4e4e7; text-anchor: middle; font-weight: 700; pointer-events: none; }
+        .map-node-player { font-size: 4px; pointer-events: none; }
+        #travel-list {
+            background: #1c1917;
+            border-radius: 10px;
+            border: 1px solid #57534e;
+            overflow: hidden;
+            max-height: 280px;
+            overflow-y: auto;
+        }
+        .travel-days-badge {
+            font-size: 0.7rem; font-weight: 700; color: #86efac;
+            background: rgba(0,0,0,0.5); padding: 2px 6px; border-radius: 6px;
+            border: 1px solid rgba(134,239,172,0.3);
+        }
+        .map-crumb {
+            background: none; border: none; color: #a1a1aa;
+            font-size: 0.8rem; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+        }
+        .map-crumb:hover { color: #fbbf24; background: #3f3f46; }
+        .map-crumb.active { color: #fbbf24; font-weight: 700; }
+        #map-toast {
+            position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+            background: #18181b; border: 1px solid #57534e; padding: 6px 14px;
+            border-radius: 8px; font-size: 0.75rem; color: #d4d4d8;
+            transition: opacity 0.3s; white-space: nowrap; z-index: 10;
+        }
+
+        /* Info Modal */
+        .info-tab {
+            padding: 0.5rem 1.25rem;
+            border-radius: 0.75rem 0.75rem 0 0;
+            background: #3f3f46;
+            color: #a1a1aa;
+            transition: background 0.15s, color 0.15s;
+        }
+        .info-tab-active {
+            background: #292524;
+            color: #fbbf24;
+            border-bottom: 2px solid #fbbf24;
+        }
+        .murim-loc-card {
+            background: #1c1917;
+            border: 1px solid #57534e;
+            border-radius: 0.75rem;
+            padding: 0.75rem 1rem;
+        }
+        .level-badge {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.4rem 1rem;
+            background: linear-gradient(135deg, #92400e, #b45309);
+            border: 2px solid #fbbf24;
+            border-radius: 9999px;
+            font-weight: 800;
+            font-size: 1.1rem;
+            color: #fef3c7;
+            box-shadow: 0 0 12px rgba(251,191,36,0.25);
+        }
+        .level-badge small { font-size: 0.65rem; opacity: 0.8; font-weight: 500; }
+        .header-exp { font-size: 0.75rem; color: #a1a1aa; }
+        .header-stats {
+            display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+        }
+        .header-stat {
+            display: flex; align-items: center; gap: 0.35rem;
+            padding: 0.35rem 0.75rem;
+            background: #292524;
+            border: 1px solid #57534e;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .header-stat.gold { border-color: #b45309; color: #fcd34d; }
+        .header-stat.naegong { border-color: #1d4ed8; color: #93c5fd; }
+        .header-stat.inventory {
+            border-color: #854d0e; color: #fde68a;
+            cursor: pointer; transition: background 0.15s;
+        }
+        .header-stat.inventory:hover { background: #3f2e16; }
+        .header-ng-bar {
+            width: 48px; height: 5px; border-radius: 3px;
+            background: #3f3f46; overflow: hidden;
+        }
+        .header-ng-fill {
+            height: 100%; background: linear-gradient(90deg, #1d4ed8, #3b82f6);
+            transition: width 0.3s;
+        }
+        #inventory-popover {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            min-width: 260px;
+            max-width: 320px;
+            background: #1c1917;
+            border: 2px solid #854d0e;
+            border-radius: 1rem;
+            padding: 0.75rem;
+            z-index: 30;
+            box-shadow: 0 12px 24px rgb(0 0 0 / 0.45);
+        }
+        #inventory-popover.hidden { display: none; }
+        .inv-pop-item {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 0.5rem; padding: 0.5rem 0.6rem;
+            background: #292524; border-radius: 0.5rem;
+            font-size: 0.8rem; margin-bottom: 0.35rem;
+        }
+        .inv-pop-empty { font-size: 0.8rem; color: #71717a; text-align: center; padding: 0.5rem; }
+        .auto-battle-toggle {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.5rem 1.25rem;
+            border-radius: 9999px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            border-width: 2px;
+            transition: all 0.2s;
+        }
+        .auto-battle-toggle.auto-on {
+            background: linear-gradient(135deg, #14532d, #166534);
+            border-color: #4ade80;
+            color: #dcfce7;
+        }
+        .auto-battle-toggle.auto-off {
+            background: linear-gradient(135deg, #3f3f46, #27272a);
+            border-color: #71717a;
+            color: #d4d4d8;
+        }
+        .toggle-badge {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-weight: 800;
+        }
+        .toggle-badge.on { background: #22c55e; color: #052e16; }
+        .toggle-badge.off { background: #52525b; color: #e4e4e7; }
+        .scale-badge {
+            font-size: 0.75rem; font-weight: 700;
+            padding: 4px 10px; border-radius: 9999px;
+            background: linear-gradient(135deg, #1e3a5f, #1e293b);
+            border: 1px solid #3b82f6;
+            color: #93c5fd;
+        }
+        .place-chip {
+            font-size: 0.7rem; padding: 4px 8px; border-radius: 8px;
+            background: #27272a; border: 1px solid #52525b; color: #d4d4d8;
+        }
+        .sect-chip { border-color: #1d4ed8; background: #172554; }
+        .info-modal-box {
+            width: min(42rem, 94vw);
+            height: min(32rem, 78vh);
+            min-height: 28rem;
+        }
+        #info-content {
+            min-height: 0;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body class="murim-bg text-zinc-200 min-h-screen">
+    <div class="max-w-6xl mx-auto p-6">
+        <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+            <div class="flex items-center gap-4 flex-wrap">
+                <div>
+                    <h1 class="text-4xl font-bold text-amber-400" style="font-family: 'Noto Serif KR', serif;">협객의 길</h1>
+                    <div class="flex gap-3 mt-1">
+                        <span id="alignment-badge" class="text-sm font-bold text-zinc-300">방랑</span>
+                        <span id="day-badge" class="text-sm text-amber-500">강호 제 1일</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 flex-wrap">
+                    <div class="level-badge" title="현재 레벨">
+                        <small>LEVEL</small>
+                        <span id="header-level">1</span>
+                    </div>
+                    <span id="header-exp" class="header-exp">EXP 0/30</span>
+                </div>
+                <div class="header-stats">
+                    <div class="header-stat gold" title="소지 은전">
+                        <i class="fas fa-coins"></i>
+                        <span id="header-gold">50</span>냥
+                    </div>
+                    <div class="header-stat naegong" title="내공">
+                        <i class="fas fa-fire"></i>
+                        <span id="header-naegong">80/80</span>
+                        <div class="header-ng-bar"><div id="header-ng-fill" class="header-ng-fill" style="width:100%"></div></div>
+                    </div>
+                    <div class="relative">
+                        <button type="button" id="header-inventory-btn" onclick="toggleInventoryPopover()" class="header-stat inventory choice-btn" title="소지품 확인">
+                            <i class="fas fa-box-open"></i>
+                            <span id="header-inventory-count">0</span>개
+                        </button>
+                        <div id="inventory-popover" class="hidden">
+                            <div class="text-xs text-amber-500 font-bold mb-2"><i class="fas fa-box-open mr-1"></i>소지품</div>
+                            <div id="inventory-popover-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-2 items-center flex-wrap">
+                <button id="auto-battle-toggle" type="button" onclick="toggleAutoBattle()" class="auto-battle-toggle auto-on"></button>
+                <button onclick="openInfoModal('character')"
+                    class="px-4 py-2 bg-amber-900/60 hover:bg-amber-800/80 border border-amber-600 rounded-xl choice-btn text-sm font-bold">
+                    <i class="fas fa-scroll mr-1"></i>강호첩
+                </button>
+                <button onclick="resetGame()" class="px-4 py-2 bg-zinc-800 hover:bg-red-900 rounded-xl transition-colors text-sm">초기화</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-5 gap-4 mb-6" id="stats-bar"></div>
+
+        <div class="grid grid-cols-12 gap-6">
+            <div class="col-span-5">
+                <div class="section-card p-4 relative">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h2 class="text-lg text-amber-300"><i class="fas fa-map mr-2"></i>무림 지도</h2>
+                            <p id="map-title" class="text-sm font-bold text-amber-400/80">사천 · 지역</p>
+                            <p id="map-subtitle" class="text-xs text-zinc-500">📍 촉남촌</p>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <button onclick="setMapView('region')" class="px-2 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 rounded-lg choice-btn">
+                                <i class="fas fa-map"></i> 지역
+                            </button>
+                            <button onclick="goToMyLocation()" class="px-2 py-1 text-xs bg-amber-900/60 hover:bg-amber-800 border border-amber-700 rounded-lg choice-btn font-bold">
+                                <i class="fas fa-location-crosshairs"></i> 현장
+                            </button>
+                        </div>
+                    </div>
+                    <div id="map-breadcrumb" class="flex items-center gap-1 mb-2 text-xs"></div>
+                    <div class="flex gap-2">
+                        <div id="node-map-wrap" class="flex-1 relative">
+                            <svg id="node-map-svg" class="node-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"></svg>
+                            <div id="map-toast" class="hidden opacity-0"></div>
+                        </div>
+                        <div id="travel-list" class="w-32 shrink-0"></div>
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-3 text-xs text-zinc-500">
+                        <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-600 border border-amber-400 mr-1"></span>현재</span>
+                        <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-green-900 border border-green-400 mr-1"></span>이동가능</span>
+                        <span>선 위 숫자 = 소요 일수</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-span-7">
+                <div class="section-card p-6 min-h-[500px]" id="main-panel"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Travel Confirm Modal -->
+    <div id="travel-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-40" onclick="if(event.target===this)cancelTravel()">
+        <div class="bg-zinc-900 border-2 border-green-700 rounded-2xl w-full max-w-sm mx-4 p-6">
+            <h3 class="text-lg font-bold text-green-400 mb-4"><i class="fas fa-shoe-prints mr-2"></i>이동 확인</h3>
+            <div class="flex items-center gap-4 mb-4">
+                <span id="travel-target-icon" class="text-4xl"></span>
+                <div>
+                    <div id="travel-target-name" class="text-xl font-bold text-amber-300"></div>
+                    <div class="text-sm text-zinc-500"><span id="travel-from"></span> → 목적지</div>
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 mb-6 text-sm">
+                <div class="bg-zinc-800 rounded-lg p-3 text-center">
+                    <div class="text-zinc-500 text-xs">소요</div>
+                    <div id="travel-days" class="text-green-400 font-bold text-lg"></div>
+                </div>
+                <div class="bg-zinc-800 rounded-lg p-3 text-center">
+                    <div class="text-zinc-500 text-xs">지형</div>
+                    <div id="travel-terrain" class="text-zinc-200 font-bold"></div>
+                </div>
+                <div class="bg-zinc-800 rounded-lg p-3 text-center">
+                    <div class="text-zinc-500 text-xs">일반 조우</div>
+                    <div id="travel-risk" class="text-red-400 font-bold text-lg"></div>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mb-4 text-sm">
+                <div class="bg-zinc-800/60 rounded-lg p-2 text-center">
+                    <div class="text-zinc-500 text-xs">네임드 조우</div>
+                    <div id="travel-named-risk" class="text-amber-400 font-bold">1%</div>
+                </div>
+                <div class="bg-zinc-800/60 rounded-lg p-2 text-center">
+                    <div class="text-zinc-500 text-xs">정보 수집</div>
+                    <div class="text-blue-400 font-bold">66% 성공 · 34% 적</div>
+                </div>
+            </div>
+            <p id="travel-kind" class="text-xs text-zinc-600 mb-2 text-center"></p>
+            <p class="text-xs text-zinc-500 mb-4 text-center">조우 시 전투: <span id="travel-battle-mode" class="text-green-400 font-bold">자동</span>
+                <span class="text-zinc-600"> (상단 자동전투 토글)</span></p>
+            <div class="flex gap-3">
+                <button onclick="confirmTravel()" class="flex-1 py-3 bg-green-800 hover:bg-green-700 rounded-xl font-bold choice-btn">
+                    <i class="fas fa-walking mr-1"></i> 출발
+                </button>
+                <button onclick="cancelTravel()" class="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-xl choice-btn">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Travel Loading -->
+    <div id="travel-loading" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+        <div class="bg-zinc-900 border-2 border-amber-700 rounded-2xl w-full max-w-md mx-4 p-6">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="text-3xl animate-bounce">🥷</div>
+                <div>
+                    <h3 id="travel-loading-title" class="text-lg font-bold text-amber-300"></h3>
+                    <p id="travel-loading-sub" class="text-xs text-zinc-500"></p>
+                </div>
+            </div>
+            <div class="h-3 bg-zinc-800 rounded-full overflow-hidden mb-2">
+                <div id="travel-loading-bar" class="h-full bg-gradient-to-r from-amber-700 to-amber-400 rounded-full transition-all duration-500" style="width:0%"></div>
+            </div>
+            <p id="travel-loading-status" class="text-sm text-zinc-400 text-center mb-4">이동 중...</p>
+            <div id="travel-loading-log" class="max-h-40 overflow-y-auto space-y-1 border-t border-zinc-800 pt-3"></div>
+        </div>
+    </div>
+
+    <!-- Info Modal -->
+    <div id="info-modal" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-40" onclick="if(event.target===this)closeInfoModal()">
+        <div class="info-modal-box bg-zinc-900 border-2 border-amber-700 rounded-2xl mx-4 flex flex-col shrink-0">
+            <div class="flex items-center justify-between px-6 pt-5">
+                <div class="flex gap-1">
+                    <button class="info-tab info-tab-active" data-tab="character" onclick="switchInfoTab('character')">
+                        <i class="fas fa-user mr-1"></i>협객 정보
+                    </button>
+                    <button class="info-tab" data-tab="murim" onclick="switchInfoTab('murim')">
+                        <i class="fas fa-book mr-1"></i>강호 지식
+                    </button>
+                </div>
+                <button onclick="closeInfoModal()" class="text-zinc-500 hover:text-zinc-200 text-xl px-2">&times;</button>
+            </div>
+            <div id="info-content" class="p-6 overflow-y-auto flex-1"></div>
+        </div>
+    </div>
+
+    <!-- Battle Modal -->
+    <div id="battle-modal" class="hidden fixed inset-0 bg-black/95 flex items-center justify-center z-50">
+        <div class="bg-zinc-900 border-2 border-amber-700 rounded-3xl w-full max-w-2xl mx-4">
+            <div class="p-8">
+                <h2 id="battle-modal-title" class="text-2xl font-bold text-amber-400 text-center mb-6">⚔️ 전투</h2>
+                <div class="flex justify-between items-start mb-6">
+                    <div class="text-center flex-1">
+                        <div class="sd-placeholder mx-auto mb-2 text-3xl">🥷</div>
+                        <div class="font-bold">방랑 협객</div>
+                        <div class="hp-bar mt-2 w-32 mx-auto">
+                            <div id="player-hp-bar" class="hp-fill hp-fill-player" style="width:100%"></div>
+                        </div>
+                        <div id="player-hp-text" class="text-xs text-zinc-400 mt-1">120/120</div>
+                        <div class="hp-bar mt-1 w-32 mx-auto">
+                            <div id="player-ng-bar" class="hp-fill ng-fill" style="width:100%"></div>
+                        </div>
+                        <div id="player-ng-text" class="text-xs text-blue-400 mt-1">80/80</div>
+                    </div>
+                    <div class="text-4xl font-bold text-amber-500 self-center">VS</div>
+                    <div class="text-center flex-1">
+                        <div class="sd-placeholder mx-auto mb-2 text-3xl" id="enemy-icon">👹</div>
+                        <div id="enemy-name" class="font-bold">산적</div>
+                        <div class="hp-bar mt-2 w-32 mx-auto">
+                            <div id="enemy-hp-bar" class="hp-fill hp-fill-enemy" style="width:100%"></div>
+                        </div>
+                        <div id="enemy-hp-text" class="text-xs text-zinc-400 mt-1">60/60</div>
+                    </div>
+                </div>
+                <div id="battle-log" class="bg-zinc-800/50 rounded-xl p-4 mb-6 max-h-28 overflow-y-auto space-y-1"></div>
+                <div id="battle-actions" class="grid grid-cols-2 gap-4 battle-actions-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Battle Result Modal (네임드 격파) -->
+    <div id="battle-result-modal" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-[60]" onclick="if(event.target===this)closeBattleResultModal()">
+        <div class="bg-zinc-900 border-2 border-amber-500 rounded-3xl w-full max-w-md mx-4 p-8 text-center shadow-2xl shadow-amber-900/30">
+            <div id="result-icon" class="text-6xl mb-4">🏆</div>
+            <h2 id="result-title" class="text-2xl font-bold text-amber-300 mb-1">승리!</h2>
+            <p id="result-subtitle" class="text-sm text-zinc-400 mb-6"></p>
+            <div class="grid grid-cols-3 gap-3 mb-4 text-sm">
+                <div class="bg-zinc-800 rounded-xl p-3">
+                    <div class="text-zinc-500 text-xs">명성</div>
+                    <div id="result-fame" class="text-yellow-400 font-bold text-lg">+0</div>
+                </div>
+                <div class="bg-zinc-800 rounded-xl p-3">
+                    <div class="text-zinc-500 text-xs">경험치</div>
+                    <div id="result-exp" class="text-blue-400 font-bold text-lg">+0</div>
+                </div>
+                <div class="bg-zinc-800 rounded-xl p-3">
+                    <div class="text-zinc-500 text-xs">은전</div>
+                    <div id="result-gold" class="text-amber-400 font-bold text-lg">+0냥</div>
+                </div>
+            </div>
+            <div id="result-item" class="hidden mb-6 p-3 bg-amber-900/30 border border-amber-700 rounded-xl text-sm"></div>
+            <button onclick="closeBattleResultModal()" class="px-10 py-3 bg-amber-700 hover:bg-amber-600 rounded-xl font-bold choice-btn">
+                <i class="fas fa-check mr-1"></i>확인
+            </button>
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+export let gameState = {
+    fame: 0,
+    notoriety: 0,
+    chivalry: 10,
+    hp: 120,
+    maxHp: 120,
+    naegong: 80,
+    maxNaegong: 80,
+    atk: 18,
+    def: 12,
+    level: 1,
+    exp: 0,
+    gold: 50,
+    day: 1,
+    currentRegion: '사천',
+    currentArea: '촉남촌',
+    currentLocation: '촉남촌',
+    mapView: 'region',
+    viewRegion: '사천',
+    visitedRegions: ['사천'],
+    visitedAreas: ['촉남촌'],
+    visitedLocations: ['촉남촌'],
+    heardCriminalRumor: false,
+    savedWanderer: false,
+    defeatedBandit: false,
+    eventLog: [],
+    currentEvent: null,
+    autoBattle: true,
+    inventory: [],
+    defeatedNamed: [],
+    defeatedHeukSaryong: false,
+    defeatedHyeolmaGeom: false,
+    defeatedCheongpung: false,
+    defeatedDoksaGungju: false,
+    sectAffinity: {},
+    placeUI: null,
+};
+
+export function toggleAutoBattle() {
+    gameState.autoBattle = !gameState.autoBattle;
+}
+
+export const locations = [
+    { id: '촉남촌', icon: '🏘️', desc: '사천 성도부 근교의 작은 촌락. 협객의 여정이 시작되는 곳.' },
+    { id: '성도부', icon: '🏯', desc: '촉중 제일의 번화 도시. 강호 각가의 정보가 모인다.' },
+    { id: '청성산', icon: '☯️', desc: '도가 명문 청성파가 있는 명산.' },
+    { id: '검각관', icon: '⚠️', desc: '산적과 사파 무인이 출몰하는 험한 관문.' },
+    { id: '峨嵋금정', icon: '🔔', desc: '峨嵋파 본산. 정파 여협의 성지.' },
+];
+
+export function modifyStats(changes) {
+    Object.assign(gameState, changes);
+    if (gameState.hp > gameState.maxHp) gameState.hp = gameState.maxHp;
+    if (gameState.hp < 0) gameState.hp = 0;
+    if (gameState.naegong > gameState.maxNaegong) gameState.naegong = gameState.maxNaegong;
+    if (gameState.naegong < 0) gameState.naegong = 0;
+}
+
+export function visitLocation(id) {
+    if (!gameState.visitedLocations.includes(id)) gameState.visitedLocations.push(id);
+    if (!gameState.visitedAreas.includes(id)) gameState.visitedAreas.push(id);
+}
+
+export function visitRegion(id) {
+    if (!gameState.visitedRegions.includes(id)) gameState.visitedRegions.push(id);
+}
+
+export function addLog(text) {
+    gameState.eventLog.unshift(text);
+    if (gameState.eventLog.length > 8) gameState.eventLog.pop();
+}
+
+export function advanceDays(days, destination) {
+    if (days <= 0) return;
+    gameState.day += days;
+    addLog(`🚶 ${days}일 소요 — ${destination}(에) 도착 (제 ${gameState.day}일)`);
+    if (days >= 3) {
+        const fatigue = Math.floor(days / 3);
+        modifyStats({ hp: gameState.hp - fatigue });
+        if (fatigue > 0) addLog(`장거리 이동으로 체력 ${fatigue} 소모.`);
+    }
+}
+
+export function formatDayLabel(days) {
+    if (days <= 0) return '0일';
+    if (days < 1) return '반일';
+    return `${days}일`;
+}
+
+export function gainExp(amount) {
+    gameState.exp += amount;
+    while (gameState.exp >= gameState.level * 30) {
+        gameState.exp -= gameState.level * 30;
+        levelUp();
+    }
+}
+
+export function levelUp() {
+    gameState.level += 1;
+    gameState.maxHp += 20;
+    gameState.hp = gameState.maxHp;
+    gameState.maxNaegong += 15;
+    gameState.naegong = gameState.maxNaegong;
+    gameState.atk += 4;
+    gameState.def += 2;
+    if (gameState._baseStats) {
+        gameState._baseStats.atk += 4;
+        gameState._baseStats.def += 2;
+        gameState._baseStats.maxHp += 20;
+    }
+    addLog(`🎉 레벨 ${gameState.level} 달성! 능력이 상승했다.`);
+}
+
+export function getAlignment() {
+    const { fame, notoriety, chivalry } = gameState;
+    if (notoriety > fame + 10) return { label: '사파', color: 'text-red-400' };
+    if (fame > notoriety + 10) return { label: '정파', color: 'text-blue-400' };
+    if (chivalry >= 20) return { label: '대협', color: 'text-amber-300' };
+    return { label: '방랑', color: 'text-zinc-300' };
+}
