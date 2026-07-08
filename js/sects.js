@@ -1,12 +1,122 @@
 import * as state from './state.js';
 import * as ui from './ui.js';
 import * as battle from './battle.js';
+import * as hero from './hero.js';
+import * as realm from './realm.js';
+
+export const SECT_JOIN_AFFINITY = 50;
+export const SECT_LEADER_AFFINITY = 85;
+export const SECT_LEADER_MIN_LEVEL = 28;
+export const SECT_LEADER_MIN_REALM = 4;
+export const GRAND_MASTER_LEVEL = 55;
+export const GRAND_MASTER_REALM = 6;
+
+export function getSectFamilyName(sect) {
+    if (!sect) return '';
+    if (sect.familyName) return sect.familyName;
+    const m = sect.name.match(/^(.+?파)/);
+    if (m) return m[1];
+    return sect.name.split(' ')[0];
+}
+
+function findBestSectAffiliation(gs) {
+    const aff = gs.sectAffinity || {};
+    const disp = hero.getDisposition(gs);
+    let best = null;
+
+    for (const [sectId, value] of Object.entries(aff)) {
+        if (value < SECT_JOIN_AFFINITY) continue;
+        const sect = getSect(sectId);
+        if (!sect) continue;
+        if (sect.faction === '사파' && disp.short !== '사') continue;
+        if (sect.faction === '정파' && disp.short === '사' && value < 70) continue;
+        if (!best || value > best.affinity) {
+            best = { sectId, sect, affinity: value, family: getSectFamilyName(sect) };
+        }
+    }
+    return best;
+}
+
+function promoteSectLeader(gs, best, prefix = '') {
+    const prev = gs.sectStanding?.rank;
+    gs.sectStanding = {
+        sectId: best.sectId,
+        sectName: best.sect.name,
+        sectFamily: best.family,
+        rank: 'leader',
+        memberTitle: '문파장',
+        joinedDay: gs.sectStanding?.joinedDay || gs.day,
+    };
+    if (prev !== 'leader') {
+        state.addLog(`${prefix}【${best.family} 문파장】의 위칭을 얻었다! 강호에 문파명이 널리 알려진다.`);
+    }
+    return gs.sectStanding;
+}
+
+export function checkSectStanding(gs = state.gameState) {
+    const r = realm.getRealm(gs.level);
+    const best = findBestSectAffiliation(gs);
+    const standing = gs.sectStanding;
+
+    const isGrandMaster = gs.level >= GRAND_MASTER_LEVEL || r.rank >= GRAND_MASTER_REALM;
+
+    if (isGrandMaster && best && best.affinity >= SECT_LEADER_AFFINITY) {
+        return promoteSectLeader(gs, best, '대종사의 위격으로 ');
+    }
+
+    if (standing?.rank === 'leader') return standing;
+
+    if (standing?.rank === 'disciple' && best
+        && best.affinity >= SECT_LEADER_AFFINITY
+        && gs.level >= SECT_LEADER_MIN_LEVEL
+        && r.rank >= SECT_LEADER_MIN_REALM
+        && standing.sectId === best.sectId) {
+        return promoteSectLeader(gs, best, '');
+    }
+
+    if (!standing && best) {
+        const memberTitle = best.sect.tier === '본문' ? '내문제자' : best.sect.tier === '분파' ? '외문제자' : '속가제자';
+        gs.sectStanding = {
+            sectId: best.sectId,
+            sectName: best.sect.name,
+            sectFamily: best.family,
+            rank: 'disciple',
+            memberTitle,
+            joinedDay: gs.day,
+        };
+        state.addLog(`🏯 ${best.family}에 입문했다. 별호는 아직 없으나 문파 소속이 붙었다.`);
+        return gs.sectStanding;
+    }
+
+    return standing || null;
+}
+
+export function tryFoundSect(gs = state.gameState) {
+    const r = realm.getRealm(gs.level);
+    if (gs.sectStanding?.rank === 'leader') return gs.sectStanding;
+    if (gs.level < GRAND_MASTER_LEVEL && r.rank < GRAND_MASTER_REALM) return null;
+
+    const name = (gs.hero?.name || '').trim();
+    const family = name ? `${name}문` : '개인문파';
+    gs.sectStanding = {
+        sectId: 'founded',
+        sectName: family,
+        sectFamily: family,
+        rank: 'leader',
+        memberTitle: '문파장',
+        founded: true,
+        joinedDay: gs.day,
+    };
+    state.addLog(`🏔️ 대종사의 경지에 이르러 【${family}】을(를) 개문했다! 문파장으로 강호에 이름을 떨친다.`);
+    return gs.sectStanding;
+}
 
 /** tier: 본문(대도 정파) | 분파(외곽) | 속가(촌·속가제자) */
 export const SECTS = {
     cheongseong_main: {
         id: 'cheongseong_main',
         name: '청성파',
+        familyName: '청성파',
         tier: '본문',
         icon: '☯️',
         faction: '정파',
@@ -156,6 +266,7 @@ export function modifyAffinity(sectId, delta) {
     if (!gs.sectAffinity) gs.sectAffinity = {};
     const next = Math.max(-50, Math.min(100, (gs.sectAffinity[sectId] ?? 0) + delta));
     gs.sectAffinity[sectId] = next;
+    hero.checkSectStanding(gs);
     return next;
 }
 
@@ -214,7 +325,7 @@ export function requestSparring(sectId) {
             const fameGain = sect.faction === '사파' ? 0 : 2;
             const aff = modifyAffinity(sectId, affGain);
             state.gainExp(12 + g.level * 2);
-            if (fameGain) state.modifyStats({ fame: g.fame + fameGain });
+            if (fameGain) state.applyChivalryChange(fameGain);
             state.addLog(`⚔️ ${sect.name} 대련 승! 우호 +${affGain}${fameGain ? `, 명성 +${fameGain}` : ''} (${getAffinityLabel(aff).label})`);
         } else {
             const aff = modifyAffinity(sectId, -1);
@@ -433,6 +544,11 @@ export function trainAtSect(sectId) {
     const t = sect.train;
     if (gs.gold < t.gold) {
         state.addLog(`수련비 ${t.gold}냥이 필요하다.`);
+        ui.updateAllUI();
+        return;
+    }
+    if (!gs.naegongUnlocked) {
+        state.addLog('아직 내공이 개통되지 않아 문파 수련을 할 수 없다. (삼류 중반)');
         ui.updateAllUI();
         return;
     }

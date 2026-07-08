@@ -1,11 +1,14 @@
+import { NAEGONG_UNLOCK_LEVEL, getRealm } from './realm.js';
+
 export let gameState = {
     fame: 0,
     notoriety: 0,
-    chivalry: 10,
+    chivalry: 0,
     hp: 120,
     maxHp: 120,
-    naegong: 80,
-    maxNaegong: 80,
+    naegong: 0,
+    maxNaegong: 0,
+    naegongUnlocked: false,
     atk: 18,
     def: 12,
     level: 1,
@@ -33,7 +36,27 @@ export let gameState = {
     defeatedCheongpung: false,
     defeatedDoksaGungju: false,
     sectAffinity: {},
+    sectStanding: null,
     placeUI: null,
+    hero: {
+        name: '',
+        alias: '',
+        subtitle: '복면을 쓴 행인',
+        masked: true,
+    },
+    enlightenment: {
+        counts: { battle: 0, spar: 0, dojo: 0, gather: 0 },
+        total: 0,
+    },
+    intelJournal: [],
+    intelGatherAttempts: 0,
+    martialArts: {
+        learned: [
+            { id: 'samjae_sword', level: 1, exp: 0 },
+            { id: 'ohaeng_step', level: 1, exp: 0 },
+        ],
+    },
+    evasion: 7,
 };
 
 export function toggleAutoBattle() {
@@ -48,8 +71,63 @@ export const locations = [
     { id: '峨嵋금정', icon: '🔔', desc: '峨嵋파 본산. 정파 여협의 성지.' },
 ];
 
+/**
+ * 협의 변동 — 양립불가
+ * 협의↑ → 명성↑ / 협의↓ → 악명↑ (동시에 오르지 않음)
+ */
+export function applyChivalryChange(delta) {
+    if (!delta) return;
+    const gs = gameState;
+    if (delta > 0) {
+        gs.chivalry += delta;
+        gs.fame += delta;
+    } else {
+        const loss = Math.abs(delta);
+        gs.chivalry = Math.max(0, gs.chivalry - loss);
+        gs.notoriety += loss;
+    }
+}
+
+function applyReputationChanges(changes) {
+    const gs = gameState;
+    let chivalryDelta = 0;
+
+    if ('chivalry' in changes) {
+        chivalryDelta += changes.chivalry - gs.chivalry;
+        delete changes.chivalry;
+    }
+    if ('fame' in changes) {
+        const fameDelta = changes.fame - gs.fame;
+        if (fameDelta > 0) chivalryDelta += fameDelta;
+        else gs.fame = Math.max(0, changes.fame);
+        delete changes.fame;
+    }
+    if ('notoriety' in changes) {
+        const ngDelta = changes.notoriety - gs.notoriety;
+        if (ngDelta > 0) chivalryDelta -= ngDelta;
+        else gs.notoriety = Math.max(0, changes.notoriety);
+        delete changes.notoriety;
+    }
+
+    if (chivalryDelta > 0) applyChivalryChange(chivalryDelta);
+    else if (chivalryDelta < 0) applyChivalryChange(chivalryDelta);
+}
+
 export function modifyStats(changes) {
-    Object.assign(gameState, changes);
+    const rep = {};
+    if ('chivalry' in changes) rep.chivalry = changes.chivalry;
+    if ('fame' in changes) rep.fame = changes.fame;
+    if ('notoriety' in changes) rep.notoriety = changes.notoriety;
+    if (Object.keys(rep).length) {
+        const rest = { ...changes };
+        delete rest.chivalry;
+        delete rest.fame;
+        delete rest.notoriety;
+        applyReputationChanges(rep);
+        Object.assign(gameState, rest);
+    } else {
+        Object.assign(gameState, changes);
+    }
     if (gameState.hp > gameState.maxHp) gameState.hp = gameState.maxHp;
     if (gameState.hp < 0) gameState.hp = 0;
     if (gameState.naegong > gameState.maxNaegong) gameState.naegong = gameState.maxNaegong;
@@ -95,12 +173,27 @@ export function gainExp(amount) {
     }
 }
 
+export function checkNaegongUnlock() {
+    const gs = gameState;
+    if (gs.naegongUnlocked) return false;
+    const unlockLevel = NAEGONG_UNLOCK_LEVEL;
+    if (gs.level < unlockLevel) return false;
+    gs.naegongUnlocked = true;
+    gs.maxNaegong = 60;
+    gs.naegong = 60;
+    addLog(`🌀 삼류 중반의 경지에 이르러 단전이 열렸다! 내공을 다룰 수 있게 되었다. (Lv.${unlockLevel})`);
+    return true;
+}
+
 export function levelUp() {
+    const prevRealm = getRealmLabel(gameState.level);
     gameState.level += 1;
     gameState.maxHp += 20;
     gameState.hp = gameState.maxHp;
-    gameState.maxNaegong += 15;
-    gameState.naegong = gameState.maxNaegong;
+    if (gameState.naegongUnlocked) {
+        gameState.maxNaegong += 15;
+        gameState.naegong = gameState.maxNaegong;
+    }
     gameState.atk += 4;
     gameState.def += 2;
     if (gameState._baseStats) {
@@ -108,13 +201,27 @@ export function levelUp() {
         gameState._baseStats.def += 2;
         gameState._baseStats.maxHp += 20;
     }
+    const newRealm = getRealmLabel(gameState.level);
+    if (newRealm !== prevRealm) {
+        addLog(`🏔️ 경지 상승! 【${newRealm}】에 이르렀다.`);
+    }
+    checkNaegongUnlock();
     addLog(`🎉 레벨 ${gameState.level} 달성! 능력이 상승했다.`);
+    queueMicrotask(() => {
+        import('./sects.js').then(s => {
+            s.checkSectStanding(gameState);
+            s.tryFoundSect(gameState);
+        });
+    });
+}
+
+function getRealmLabel(level) {
+    return getRealm(level).name;
 }
 
 export function getAlignment() {
-    const { fame, notoriety, chivalry } = gameState;
-    if (notoriety > fame + 10) return { label: '사파', color: 'text-red-400' };
-    if (fame > notoriety + 10) return { label: '정파', color: 'text-blue-400' };
-    if (chivalry >= 20) return { label: '대협', color: 'text-amber-300' };
+    const { fame, notoriety } = gameState;
+    if (notoriety > fame + 8) return { label: '사파', color: 'text-red-400' };
+    if (fame > notoriety + 8) return { label: '정파', color: 'text-blue-400' };
     return { label: '방랑', color: 'text-zinc-300' };
 }

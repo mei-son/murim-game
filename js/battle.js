@@ -1,6 +1,9 @@
 import * as state from './state.js';
 import * as ui from './ui.js';
 import * as encounters from './encounters.js';
+import * as martial from './martial.js';
+import * as hero from './hero.js';
+import * as enlightenment from './enlightenment.js';
 
 let currentEnemy = null;
 let battleLog = [];
@@ -19,7 +22,7 @@ export function simulateAutoBattle(gs, enemy) {
 
     while (pHp > 0 && eHp > 0 && turn < maxTurns) {
         turn++;
-        const useSkill = pNg >= 15 && eHp > gs.atk * 1.2;
+        const useSkill = martial.isNaegongUnlocked(gs) && pNg >= 15 && eHp > gs.atk * 1.2;
         let dmg;
         if (useSkill) {
             pNg -= 15;
@@ -32,9 +35,13 @@ export function simulateAutoBattle(gs, enemy) {
         eHp -= dmg;
         if (eHp <= 0) break;
 
-        dmg = Math.max(1, enemy.atk - gs.def + Math.floor(Math.random() * 3));
-        pHp -= dmg;
-        log.push(`💥 ${enemy.name} 반격! ${dmg} 피해 (내 HP ${Math.max(0, pHp)})`);
+        if (martial.rollEvasion(gs)) {
+            log.push(`💨 ${enemy.name}의 공격을 회피했다!`);
+        } else {
+            dmg = Math.max(1, enemy.atk - gs.def + Math.floor(Math.random() * 3));
+            pHp -= dmg;
+            log.push(`💥 ${enemy.name} 반격! ${dmg} 피해 (내 HP ${Math.max(0, pHp)})`);
+        }
     }
 
     const victory = eHp <= 0 && pHp > 0;
@@ -176,10 +183,18 @@ export function resolveTravelEncounter(enemy) {
     applyBattleStats(result);
     let rewards = null;
     if (result.victory) rewards = travelVictoryReward(enemy);
-    return { ...result, enemyName: enemy.name, fled: false, named: enemy.named, rewards };
+    const enlight = enlightenment.tryEnlightenment('battle', false);
+    if (enlight) ui.showEnlightenmentToast(enlight);
+    return { ...result, enemyName: enemy.name, fled: false, named: enemy.named, rewards, enlightenment: enlight };
 }
 
 function showBattleModal() {
+    const heroDisp = hero.getHeroDisplay(state.gameState);
+    const nameEl = document.getElementById('player-battle-name');
+    const subEl = document.getElementById('player-battle-sub');
+    if (nameEl) nameEl.textContent = heroDisp.publicName;
+    if (subEl) subEl.textContent = `별호 ${heroDisp.aliasDisplay} · 성향 ${heroDisp.disposition.label}`;
+
     const titleEl = document.getElementById('battle-modal-title');
     if (titleEl) {
         if (battleContext === 'travel') {
@@ -216,8 +231,12 @@ function updateBattleUI() {
 
     document.getElementById('player-hp-bar').style.width = `${(gs.hp / gs.maxHp) * 100}%`;
     document.getElementById('player-hp-text').textContent = `${gs.hp}/${gs.maxHp}`;
-    document.getElementById('player-ng-bar').style.width = `${(gs.naegong / gs.maxNaegong) * 100}%`;
-    document.getElementById('player-ng-text').textContent = `${gs.naegong}/${gs.maxNaegong}`;
+    const ngUnlocked = martial.isNaegongUnlocked(gs);
+    const ngPct = ngUnlocked && gs.maxNaegong > 0 ? (gs.naegong / gs.maxNaegong) * 100 : 0;
+    document.getElementById('player-ng-bar').style.width = `${ngPct}%`;
+    document.getElementById('player-ng-text').textContent = ngUnlocked
+        ? `${gs.naegong}/${gs.maxNaegong}`
+        : '내공 미타동';
 
     const nameEl = document.getElementById('enemy-name');
     nameEl.textContent = getEnemyDisplayName(enemy);
@@ -252,9 +271,11 @@ function updateBattleUI() {
             class="choice-btn p-4 bg-blue-900/50 hover:bg-blue-800 border border-blue-600 rounded-xl font-bold">
             <i class="fas fa-shield-alt mr-2"></i>방어
         </button>
-        <button onclick="window.battleAction('skill')" ${autoDisabled ? 'disabled' : ''}
-            class="choice-btn p-4 bg-orange-900/50 hover:bg-orange-800 border border-orange-600 rounded-xl font-bold">
-            <i class="fas fa-fire mr-2"></i>내공술
+        <button onclick="window.battleAction('skill')" ${autoDisabled || !ngUnlocked ? 'disabled' : ''}
+            class="choice-btn p-4 bg-orange-900/50 hover:bg-orange-800 border border-orange-600 rounded-xl font-bold
+            ${!ngUnlocked ? 'opacity-40 cursor-not-allowed' : ''}"
+            title="${ngUnlocked ? '내공 15 소모' : '내공 미타동 (삼류 중반)'}">
+            <i class="fas fa-fire mr-2"></i>내공술${!ngUnlocked ? ' 🔒' : ''}
         </button>
         <button onclick="window.battleAction('flee')" ${autoDisabled ? 'disabled' : ''}
             class="choice-btn p-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-xl font-bold">
@@ -282,6 +303,11 @@ export function playerAction(type) {
             return;
         }
         case 'skill': {
+            if (!martial.isNaegongUnlocked(gs)) {
+                battleLog.push('아직 내공이 개통되지 않았다!');
+                updateBattleUI();
+                return;
+            }
             if (gs.naegong < 15) {
                 battleLog.push('내공이 부족하다!');
                 updateBattleUI();
@@ -319,6 +345,11 @@ export function playerAction(type) {
 function enemyTurn() {
     const gs = state.gameState;
     const enemy = currentEnemy;
+    if (martial.rollEvasion(gs)) {
+        battleLog.push(`💨 ${enemy.name}의 공격을 회피했다! (오행보법)`);
+        updateBattleUI();
+        return;
+    }
     let dmg = Math.max(1, enemy.atk - gs.def + Math.floor(Math.random() * 4));
     if (defending) {
         dmg = Math.floor(dmg / 2);
@@ -355,7 +386,12 @@ function endBattle(victory, defeated = false, fled = false) {
 
     if (ctx === 'travel' && travelResolve) {
         if (victory && callback) callback();
-        travelResolve({ victory, defeat: defeated, fled, enemyName: resolvedEnemyName, named: resolvedEnemy?.named });
+        let enlight = null;
+        if (!fled) {
+            enlight = enlightenment.tryEnlightenment(ctx, fled);
+            if (enlight) ui.showEnlightenmentToast(enlight);
+        }
+        travelResolve({ victory, defeat: defeated, fled, enemyName: resolvedEnemyName, named: resolvedEnemy?.named, enlightenment: enlight });
         ui.updateAllUI();
         return;
     }
@@ -380,6 +416,11 @@ function endBattle(victory, defeated = false, fled = false) {
     } else if (fled) {
         state.addLog('전투에서 도망쳤다.');
         if ((ctx === 'spar' || ctx === 'dojo') && callback) callback(false);
+    }
+
+    if (ctx !== 'travel' && !fled) {
+        const enlight = enlightenment.tryEnlightenment(ctx, fled);
+        if (enlight) ui.showEnlightenmentToast(enlight);
     }
 
     ui.updateAllUI();

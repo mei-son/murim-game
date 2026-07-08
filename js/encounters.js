@@ -1,4 +1,6 @@
 import * as state from './state.js';
+import * as martial from './martial.js';
+import * as intel from './intel.js';
 
 /** 이동 중 일반 랜덤 조우 — 매우 낮음 */
 export function getTravelEncounterChance(fame, totalDays) {
@@ -80,37 +82,11 @@ export const NAMED_ENEMIES = [
     },
 ];
 
-const INTEL_BY_AREA = {
-    '촉남촌': [
-        { text: '촉남촌 주민: 성도부 주막에 강호 소문이 모인다고 한다.', effect: () => {} },
-        { text: '행상인: 청풍검이 근처 숲에서 수련 중이라 한다.', effect: () => state.modifyStats({ fame: state.gameState.fame + 1 }) },
-        { text: '노인: 검각관 길은 산적뿐 아니라 사파 고수도 오간다고 한다.', effect: () => { state.gameState.heardCriminalRumor = true; } },
-        { text: '약초꾼: 영초가 산기슭에 자란다. (영초 획득)', effect: () => addItem('영초') },
-    ],
-    '성도부': [
-        { text: '주막 소문: 검각관에 흑사룡이 나타났다는 이야기가 돈다.', effect: () => { state.gameState.heardCriminalRumor = true; state.modifyStats({ fame: state.gameState.fame + 1 }); } },
-        { text: '상인: 혈마검이 최근 강호에서 소문난다. 조심하라.', effect: () => state.modifyStats({ fame: state.gameState.fame + 1 }) },
-        { text: '정보상: 무림맹 첩자가 성도부에 있다는 말이 있다. (은전 +15)', effect: () => state.modifyStats({ gold: state.gameState.gold + 15 }) },
-        { text: '주점: 독사궁주가 검각관 근처에서 목격됐다.', effect: () => state.modifyStats({ fame: state.gameState.fame + 2 }) },
-    ],
-    '검각관': [
-        { text: '낙서: 흑사룡의 서식지 표시. 위험하지만 큰 보상이 따른다.', effect: () => state.modifyStats({ fame: state.gameState.fame + 2 }) },
-        { text: '산적 시체 옆: 혈마도 흔적. 사파 고수가 지나갔다.', effect: () => state.modifyStats({ fame: state.gameState.fame + 1 }) },
-        { text: '버려진 행낭에서 은전 25냥.', effect: () => state.modifyStats({ gold: state.gameState.gold + 25 }) },
-    ],
-    '청성산': [
-        { text: '도인: 청풍검이 청성 심법을 엿보려 한다는 소문.', effect: () => state.modifyStats({ fame: state.gameState.fame + 1 }) },
-        { text: '수행승: 산중 약초를 채집했다. (내공단 획득)', effect: () => addItem('내공단') },
-    ],
-    '峨嵋금정': [
-        { text: '여협: 강호 정세가 불안하다. 네임드 무인이 늘었다.', effect: () => state.modifyStats({ fame: state.gameState.fame + 2, chivalry: state.gameState.chivalry + 2 }) },
-        { text: '제자: 무림첩을 나눠준다.', effect: () => addItem('무림첩') },
-    ],
-};
-
-const DEFAULT_INTEL = [
-    { text: '강호에서는 별다른 소식이 없다.', effect: () => {} },
-    { text: '지나가는 무인에게 길을 물었다. 다음 마을 방향을 알았다.', effect: () => state.modifyStats({ gold: state.gameState.gold + 5 }) },
+const INTEL_FAIL_MSGS = [
+    '여기저기 물어봤지만 새로운 소식을 얻지 못했다.',
+    '주막은 시끄럽지만 자네에게 도움이 될 만한 말은 없었다.',
+    '정보상들이 입을 닫고 있다. 더 이상 물을 곳이 없다.',
+    '같은 소문만 반복된다. 유의미한 정보는 없었다.',
 ];
 
 export function pickTravelEnemy(travelDays, fame) {
@@ -194,29 +170,7 @@ export function addItem(itemId) {
 }
 
 export function applyGearBonuses() {
-    const gs = state.gameState;
-    const base = gs._baseStats || null;
-    if (!base) {
-        gs._baseStats = { atk: gs.atk, def: gs.def, maxHp: gs.maxHp };
-    }
-    const b = gs._baseStats;
-    let atkBonus = 0, defBonus = 0, hpBonus = 0;
-    for (const item of gs.inventory || []) {
-        if (item.type !== 'gear') continue;
-        atkBonus += item.atk || 0;
-        defBonus += item.def || 0;
-        hpBonus += item.maxHp || 0;
-    }
-    const newMaxHp = b.maxHp + hpBonus;
-    modifyWithGear(gs, b.atk + atkBonus, b.def + defBonus, newMaxHp);
-}
-
-function modifyWithGear(gs, atk, def, maxHp) {
-    const hpRatio = gs.hp / gs.maxHp;
-    gs.atk = atk;
-    gs.def = def;
-    gs.maxHp = maxHp;
-    gs.hp = Math.min(maxHp, Math.max(1, Math.floor(hpRatio * maxHp)));
+    martial.recalcCombatStats();
 }
 
 export function useItem(itemId) {
@@ -226,7 +180,13 @@ export function useItem(itemId) {
     const item = gs.inventory[idx];
     if (item.type !== 'consumable') return false;
     if (item.heal) state.modifyStats({ hp: Math.min(gs.maxHp, gs.hp + item.heal) });
-    if (item.naegong) state.modifyStats({ naegong: Math.min(gs.maxNaegong, gs.naegong + item.naegong) });
+    if (item.naegong) {
+        if (!martial.isNaegongUnlocked(gs)) {
+            state.addLog('아직 내공이 개통되지 않아 약효를 받을 수 없다.');
+            return false;
+        }
+        state.modifyStats({ naegong: Math.min(gs.maxNaegong, gs.naegong + item.naegong) });
+    }
     if (item.fame) state.modifyStats({ fame: gs.fame + item.fame, notoriety: item.cursed ? gs.notoriety + 1 : gs.notoriety });
     gs.inventory.splice(idx, 1);
     state.addLog(`${item.icon} ${item.name} 사용`);
@@ -265,21 +225,47 @@ export function applyNormalVictoryRewards(enemy) {
     return { fameGain: 1, expGain: reward, goldGain: 5, item };
 }
 
-/** 정보 수집 시도 — { type: 'intel'|'battle'|'named', enemy?, text? } */
+/** 정보 수집 시도 — { type: 'intel'|'fail'|'battle'|'named', ... } */
 export function rollGatherIntel() {
     const gs = state.gameState;
+    intel.initIntel(gs);
     gs.day += 1;
+    gs.intelGatherAttempts += 1;
+
+    const successRate = intel.getIntelSuccessRate(gs);
 
     if (Math.random() < GATHER_ENEMY_CHANCE) {
         if (Math.random() < GATHER_NAMED_CHANCE) {
             const named = pickNamedEnemy(gs.currentArea);
-            if (named) return { type: 'named', enemy: named };
+            if (named) return { type: 'named', enemy: named, successRate };
         }
-        return { type: 'battle', enemy: pickGatherEnemy() };
+        return { type: 'battle', enemy: pickGatherEnemy(), successRate };
     }
 
-    const pool = INTEL_BY_AREA[gs.currentArea] || DEFAULT_INTEL;
-    const intel = pool[Math.floor(Math.random() * pool.length)];
-    intel.effect();
-    return { type: 'intel', text: intel.text };
+    const pool = intel.getAvailableIntelPool(gs.currentArea, gs);
+    if (!pool.length) {
+        return {
+            type: 'fail',
+            text: '이 지역에서 알 만한 소식은 이미 다 들은 것 같다. 강호첩을 확인해 보자.',
+            successRate,
+        };
+    }
+
+    if (Math.random() > successRate) {
+        const text = INTEL_FAIL_MSGS[Math.floor(Math.random() * INTEL_FAIL_MSGS.length)];
+        return { type: 'fail', text, successRate };
+    }
+
+    const entry = pool[Math.floor(Math.random() * pool.length)];
+    intel.addIntelEntry(entry, gs, gs.currentArea);
+    const cat = intel.INTEL_CATEGORIES[entry.category];
+    return {
+        type: 'intel',
+        entry,
+        text: entry.text,
+        title: entry.title,
+        category: cat?.label || '정보',
+        successRate,
+        journalCount: gs.intelJournal.length,
+    };
 }

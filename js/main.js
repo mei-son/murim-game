@@ -6,6 +6,8 @@ import * as travel from './travel.js';
 import * as encounters from './encounters.js';
 import * as sects from './sects.js';
 import * as shops from './shops.js';
+import * as martial from './martial.js';
+import * as hero from './hero.js';
 
 
 window.gameState = state.gameState;
@@ -17,7 +19,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.resetGame = () => {
-    if (confirm('초기화하시겠습니까?')) location.reload();
+    if (confirm('초기화하시겠습니까? 저장된 이름도 삭제됩니다.')) {
+        hero.clearStoredHeroProfile();
+        location.reload();
+    }
 };
 
 window.travelToLocal = events.travelToLocal;
@@ -64,3 +69,14 @@ window.sectObserve = sects.observeSect;
 window.sectSpar = sects.requestSparring;
 window.sectChallenge = sects.challengeDojo;
 window.sectTrain = sects.trainAtSect;
+window.learnMartialArt = martial.learnMartialArt;
+window.saveHeroName = () => {
+    const field = document.getElementById('hero-name-field');
+    const name = field?.value?.trim();
+    if (name && name.length >= 2) {
+        hero.setHeroName(name);
+        ui.updateAllUI();
+    }
+};
+window.confirmHeroName = ui.confirmHeroName;
+window.closeNameModal = ui.closeNameModal;

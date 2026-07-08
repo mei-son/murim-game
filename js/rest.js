@@ -1,4 +1,5 @@
 import * as state from './state.js';
+import * as martial from './martial.js';
 import * as ui from './ui.js';
 import * as places from './places.js';
 import * as sects from './sects.js';
@@ -14,8 +15,11 @@ const INN_COST = { metropolis: 28, city: 22, town: 16, village: 10, remote: 14, 
 const KIYEON_SPOTS = new Set(['청성산', '峨嵋금정', '약초원', '도관', '금정대전', '산사']);
 
 function applyRecovery(gs, rates, fullRestore = false) {
+    const ngOk = martial.isNaegongUnlocked(gs);
     if (fullRestore) {
-        state.modifyStats({ hp: gs.maxHp, naegong: gs.maxNaegong });
+        const changes = { hp: gs.maxHp };
+        if (ngOk) changes.naegong = gs.maxNaegong;
+        state.modifyStats(changes);
         return;
     }
     if (rates.oneStat) {
@@ -24,18 +28,32 @@ function applyRecovery(gs, rates, fullRestore = false) {
         return;
     }
     const hpGain = Math.max(1, Math.floor(gs.maxHp * rates.hpRate));
-    const ngGain = Math.max(1, Math.floor(gs.maxNaegong * rates.ngRate));
-    state.modifyStats({
-        hp: Math.min(gs.maxHp, gs.hp + hpGain),
-        naegong: Math.min(gs.maxNaegong, gs.naegong + ngGain),
-    });
+    const changes = { hp: Math.min(gs.maxHp, gs.hp + hpGain) };
+    if (ngOk && rates.ngRate > 0) {
+        const ngGain = Math.max(1, Math.floor(gs.maxNaegong * rates.ngRate));
+        changes.naegong = Math.min(gs.maxNaegong, gs.naegong + ngGain);
+    }
+    state.modifyStats(changes);
 }
 
+/** 읍·도시·대도, 또는 주막이 있는 곳만 숙박 가능 */
 function hasInn(gs) {
     const profile = places.getPlaceProfile(gs.currentLocation, gs.currentArea);
     if (profile.shops?.includes('tavern')) return true;
-    const innSpots = ['촌주막', '강호주막', '성도부'];
-    return innSpots.includes(gs.currentLocation) || ['metropolis', 'city', 'town'].includes(profile.scale);
+    return ['metropolis', 'city', 'town'].includes(profile.scale);
+}
+
+function getInnNotice(gs) {
+    if (hasInn(gs)) return null;
+    const profile = places.getPlaceProfile(gs.currentLocation, gs.currentArea);
+    const scale = places.getScaleInfo(profile.scale);
+    if (profile.scale === 'village') {
+        return '시골 촌락이라 숙박할 만한 숙소가 없다. 노숙만 가능하다.';
+    }
+    if (profile.scale === 'pass' || profile.scale === 'remote') {
+        return '험한 곳이라 여관이 없다. 노숙밖에 할 수 없다.';
+    }
+    return `${scale.label}이지만 숙박 가능한 숙소가 없다. 노숙만 가능하다.`;
 }
 
 function getInnCost(gs) {
@@ -68,7 +86,6 @@ export function getSectLodgingOption(gs) {
 }
 
 export function getRestOptions(gs) {
-    const profile = places.getPlaceProfile(gs.currentLocation, gs.currentArea);
     const opts = [{
         id: 'camp',
         icon: '🌙',
@@ -83,7 +100,7 @@ export function getRestOptions(gs) {
         opts.push({
             id: 'inn',
             icon: '🏨',
-            label: '숙소',
+            label: '숙박',
             desc: '주막·여관에서 하룻밤',
             detail: `체력·내공 ${Math.round(INN.hpRate * 100)}% 회복 · ${cost}냥 · 1일`,
             cost,
@@ -117,6 +134,14 @@ export function getRestOptions(gs) {
     return opts;
 }
 
+export function getRestMenuMeta(gs) {
+    const innAvailable = hasInn(gs);
+    return {
+        innAvailable,
+        notice: innAvailable ? null : getInnNotice(gs),
+    };
+}
+
 export function performRest(type, sectId) {
     const gs = state.gameState;
 
@@ -139,14 +164,14 @@ export function performRest(type, sectId) {
     if (type === 'inn') {
         const cost = getInnCost(gs);
         if (gs.gold < cost) {
-            state.addLog(`숙소비 ${cost}냥이 필요하다.`);
+            state.addLog(`숙박비 ${cost}냥이 필요하다.`);
             ui.updateAllUI();
             return;
         }
         state.modifyStats({ gold: gs.gold - cost });
         applyRecovery(gs, INN);
         gs.day += INN.days;
-        state.addLog(`🏨 숙소에서 하룻밤. 체력·내공 ${Math.round(INN.hpRate * 100)}% 회복 (${cost}냥, 제 ${gs.day}일)`);
+        state.addLog(`🏨 숙박하여 하룻밤. 체력·내공 ${Math.round(INN.hpRate * 100)}% 회복 (${cost}냥, 제 ${gs.day}일)`);
         closeRestMenu();
         ui.updateAllUI();
         return;
