@@ -8,6 +8,8 @@
 
 ![협객의 길 기동 화면](sample.png)
 
+*스크린샷: Grok AI 보조로 제작된 기동 화면*
+
 ## 플레이 방법
 
 ### 로컬 실행
@@ -38,6 +40,10 @@ https://mei-son.github.io/murim-game/ 에서 플레이할 수 있습니다.
 - HTML + Vanilla JavaScript (ES modules)
 - Tailwind CSS (CDN)
 - 빌드 없이 정적 호스팅 가능
+
+## 크레딧
+
+- 게임 기획·코드: **Grok AI** (xAI) 보조 생성 + [mei-son](https://github.com/mei-son) 큐레이션·배포
 
 ## 라이선스
 
