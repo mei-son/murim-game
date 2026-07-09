@@ -1,3 +1,9 @@
+/** 유명 거점 — 미개척 지역이어도 이름·아이콘 표시 */
+export const FAMOUS_TILES = new Set(['city', 'forest', 'village', 'sect']);
+
+/** 천하도 — 소문으로 이름 아는 큰 도 */
+export const FAMOUS_WORLD_REGIONS = new Set(['중원', '강남', '호광', '사천']);
+
 export const TILE_TYPES = {
     grass:    { class: 'tile-grass',    label: '평원' },
     forest:   { class: 'tile-forest',   label: '숲',   icon: '🌲' },
@@ -53,14 +59,14 @@ export const regionAreas = {
             '성도부': { x: 4, y: 1, icon: '🏯', tile: 'city', playable: true },
             '청성산': { x: 1, y: 1, icon: '☯️', tile: 'sect', playable: true },
             '검각관': { x: 3, y: 3, icon: '⚠️', tile: 'danger', playable: true },
-            '峨嵋금정': { x: 1, y: 0, icon: '🔔', tile: 'sect', playable: true },
+            '아미금정': { x: 1, y: 0, icon: '🔔', tile: 'sect', playable: true },
         },
         connections: {
             '촉남촌': ['성도부', '청성산'],
-            '성도부': ['촉남촌', '검각관', '峨嵋금정'],
-            '청성산': ['촉남촌', '峨嵋금정'],
+            '성도부': ['촉남촌', '검각관', '아미금정'],
+            '청성산': ['촉남촌', '아미금정'],
             '검각관': ['성도부'],
-            '峨嵋금정': ['성도부', '청성산'],
+            '아미금정': ['성도부', '청성산'],
         },
     },
     '중원': {
@@ -171,7 +177,7 @@ export const localMaps = {
             '관문': ['검각관'],
         },
     },
-    '峨嵋금정': {
+    '아미금정': {
         cols: 5, rows: 5,
         grid: [
             ['mountain','sect','mountain','mountain','mountain'],
@@ -181,14 +187,14 @@ export const localMaps = {
             ['grass','grass','grass','grass','grass'],
         ],
         spots: {
-            '峨嵋금정': { x: 1, y: 0, icon: '🔔', tile: 'sect' },
+            '아미금정': { x: 1, y: 0, icon: '🔔', tile: 'sect' },
             '금정대전': { x: 2, y: 2, icon: '🏛️', tile: 'sect' },
             '산사': { x: 2, y: 4, icon: '⛩️', tile: 'sect' },
         },
         connections: {
-            '峨嵋금정': ['금정대전', '산사'],
-            '금정대전': ['峨嵋금정'],
-            '산사': ['峨嵋금정'],
+            '아미금정': ['금정대전', '산사'],
+            '금정대전': ['아미금정'],
+            '산사': ['아미금정'],
         },
     },
 };
@@ -205,7 +211,7 @@ export const murimLore = {
     '성도부': { faction: '중립', danger: '중', desc: '촉중 제일의 번화 도시. 강호 각가의 정보가 모인다.', rumor: '검각관에 산적 두목이 나타났다는 소문이 있다.' },
     '청성산': { faction: '정파', danger: '중', desc: '도가 명산. 청성파가 자리 잡고 있다.', rumor: '청성 심법은 수심검법의 기초라 한다.' },
     '검각관': { faction: '사파', danger: '상', desc: '촉으로 들어가는 관문. 산적과 사파 무인이 출몰한다.', rumor: '흑사룡이 근처 산정에 거처한다는 이야기가 있다.' },
-    '峨嵋금정': { faction: '정파', danger: '중', desc: '峨嵋파의 본산. 여협들의 무공이 뛰어나기로 한다.', rumor: '峨嵋 검법은 정·속을 겸비한 절예라 한다.' },
+    '아미금정': { faction: '정파', danger: '중', desc: '아미파의 본산. 여협들의 무공이 뛰어나기로 한다.', rumor: '아미 검법은 정·속을 겸비한 절예라 한다.' },
     '사천': { faction: '-', danger: '-', desc: '산세가 험준한 촉중. 도가·도가·사파 세력이 교차한다.', rumor: '촉은 천하에서 가장 험한 땅 중 하나다.' },
     '중원': { faction: '-', danger: '-', desc: '천하의 중심. 무림맹과 소림사가 위치한다.', rumor: '정사와 사파의 대결은 중원에서 갈린다.' },
 };
@@ -260,7 +266,7 @@ export function getLocationMeta(spotId) {
         '성도부': { icon: '🏯', desc: '번화한 촉중 도시.' },
         '청성산': { icon: '☯️', desc: '도가 명문 청성파.' },
         '검각관': { icon: '⚠️', desc: '험한 관문.' },
-        '峨嵋금정': { icon: '🔔', desc: '峨嵋파 본산.' },
+        '아미금정': { icon: '🔔', desc: '아미파 본산.' },
     };
     return {
         id: spotId,
@@ -319,57 +325,134 @@ export function getSpotLabel(spotId, tileType) {
     return TILE_TYPES[tileType]?.label ?? '길';
 }
 
-/* ── 노드 지도 레이아웃 (0~100 좌표) ── */
+/* ── 노드 지도 레이아웃 (0~100 좌표, 넓게 펼쳐 선택 재미) ── */
 export const regionNodeLayout = {
     '사천': {
-        '峨嵋금정': { x: 50, y: 14 },
-        '청성산': { x: 22, y: 40 },
-        '성도부': { x: 78, y: 34 },
-        '촉남촌': { x: 38, y: 74 },
-        '검각관': { x: 74, y: 78 },
+        '아미금정': { x: 50, y: 6 },
+        '청성산': { x: 8, y: 30 },
+        '성도부': { x: 92, y: 24 },
+        '촉남촌': { x: 22, y: 78 },
+        '검각관': { x: 86, y: 88 },
     },
 };
 
 export const worldNodeLayout = {
-    '관동': { x: 22, y: 18 },
-    '중원': { x: 50, y: 18 },
-    '강남': { x: 78, y: 18 },
-    '서북': { x: 22, y: 50 },
-    '사천': { x: 50, y: 50 },
-    '호광': { x: 78, y: 50 },
-    '운남': { x: 22, y: 82 },
-    '민남': { x: 78, y: 82 },
+    '관동': { x: 14, y: 12 },
+    '중원': { x: 50, y: 8 },
+    '강남': { x: 86, y: 12 },
+    '서북': { x: 10, y: 50 },
+    '사천': { x: 50, y: 52 },
+    '호광': { x: 90, y: 50 },
+    '운남': { x: 14, y: 90 },
+    '민남': { x: 86, y: 90 },
 };
 
 export const localNodeLayout = {
     '촉남촌': {
-        '약초원': { x: 18, y: 42 },
-        '촉남촌': { x: 50, y: 50 },
-        '촌주막': { x: 82, y: 28 },
-        '촌입구': { x: 50, y: 82 },
+        '약초원': { x: 8, y: 18 },
+        '촌주막': { x: 92, y: 14 },
+        '촉남촌': { x: 46, y: 46 },
+        '촌입구': { x: 54, y: 90 },
     },
     '성도부': {
-        '성도부': { x: 18, y: 28 },
-        '강호주막': { x: 50, y: 18 },
-        '당포': { x: 72, y: 50 },
-        '성도남문': { x: 50, y: 82 },
+        '성도부': { x: 10, y: 20 },
+        '강호주막': { x: 88, y: 12 },
+        '당포': { x: 78, y: 52 },
+        '성도남문': { x: 42, y: 92 },
     },
     '청성산': {
-        '청성산': { x: 50, y: 16 },
-        '도관': { x: 50, y: 50 },
-        '산길': { x: 50, y: 84 },
+        '청성산': { x: 50, y: 8 },
+        '도관': { x: 18, y: 52 },
+        '산길': { x: 82, y: 86 },
     },
     '검각관': {
-        '산적소굴': { x: 28, y: 28 },
-        '검각관': { x: 50, y: 50 },
-        '관문': { x: 50, y: 82 },
+        '산적소굴': { x: 12, y: 16 },
+        '검각관': { x: 56, y: 44 },
+        '관문': { x: 88, y: 82 },
     },
-    '峨嵋금정': {
-        '峨嵋금정': { x: 50, y: 16 },
-        '금정대전': { x: 50, y: 50 },
-        '산사': { x: 50, y: 84 },
+    '아미금정': {
+        '아미금정': { x: 48, y: 6 },
+        '금정대전': { x: 20, y: 50 },
+        '산사': { x: 84, y: 88 },
     },
 };
+
+export function getSpotTile(spotId, areaId = null, regionId = null) {
+    if (areaId && localMaps[areaId]?.spots[spotId]?.tile) {
+        return localMaps[areaId].spots[spotId].tile;
+    }
+    const reg = regionId ?? getSpotRegion(spotId);
+    if (reg && regionAreas[reg]?.spots[spotId]?.tile) {
+        return regionAreas[reg].spots[spotId].tile;
+    }
+    return null;
+}
+
+export function isFamousSpot(spotId, areaId = null, regionId = null) {
+    if (!spotId) return false;
+    if (FAMOUS_WORLD_REGIONS.has(spotId)) return true;
+    const tile = getSpotTile(spotId, areaId, regionId);
+    if (tile && FAMOUS_TILES.has(tile)) return true;
+    const reg = regionId ?? getSpotRegion(spotId);
+    if (reg && regionAreas[reg]?.spots[spotId]?.playable) return true;
+    return false;
+}
+
+export function isSpotDiscovered(gs, spotId) {
+    if (!spotId) return false;
+    return gs.discoveredSpots?.includes(spotId) ?? false;
+}
+
+export function shouldShowQuestionMark(gs, spotId, mapLevel, areaId = null, regionId = null) {
+    if (mapLevel === 'local') return false;
+    if (isFamousSpot(spotId, areaId, regionId)) return false;
+    if (mapLevel === 'world') {
+        return !gs.visitedRegions?.includes(spotId) && spotId !== gs.currentRegion;
+    }
+    if (mapLevel === 'region' && regionId !== gs.currentRegion) return true;
+    return false;
+}
+
+export function isSpotNameVisible(gs, spotId, mapLevel, areaId = null, regionId = null) {
+    if (isSpotDiscovered(gs, spotId)) return true;
+    if (isFamousSpot(spotId, areaId, regionId)) return true;
+    if (mapLevel === 'world') {
+        return gs.visitedRegions?.includes(spotId) || spotId === gs.currentRegion;
+    }
+    return false;
+}
+
+export function discoverSpot(gs, spotId) {
+    if (!spotId) return false;
+    if (!gs.discoveredSpots) gs.discoveredSpots = [];
+    if (gs.discoveredSpots.includes(spotId)) return false;
+    gs.discoveredSpots.push(spotId);
+    return true;
+}
+
+/** 현재 위치·거점 — 주변 탐색·정보 수집 시 지명 해금 */
+export function discoverCurrentPlace(gs) {
+    const ids = [gs.currentLocation, gs.currentArea].filter(Boolean);
+    let any = false;
+    for (const id of ids) {
+        if (discoverSpot(gs, id)) any = true;
+    }
+    return any;
+}
+
+export function getMapNodeIcon(gs, spotId, realIcon, mapLevel, areaId = null, regionId = null) {
+    if (shouldShowQuestionMark(gs, spotId, mapLevel, areaId, regionId)) return '❓';
+    return realIcon;
+}
+
+export function getMapNodeLabel(gs, spotId, mapLevel, areaId = null, regionId = null) {
+    return isSpotNameVisible(gs, spotId, mapLevel, areaId, regionId) ? spotId : '';
+}
+
+/** 인접하면 이동 가능 — 지명은 탐색·정보 수집으로 해금 */
+export function canNavigateToSpot() {
+    return true;
+}
 
 export function getGraphEdges(connections) {
     const edges = [];

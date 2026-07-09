@@ -1,4 +1,5 @@
 import * as state from './state.js';
+import * as inventory from './inventory.js';
 import * as realm from './realm.js';
 
 /** 무공 등급 — 하류일수록 레벨당 상승치가 낮음 */
@@ -82,6 +83,104 @@ export const MARTIAL_CATALOG = {
         potentialMax: 50,
         perLevel: { atk: 4, def: 2.5 },
     },
+    cheongseong_sword: {
+        id: 'cheongseong_sword',
+        name: '청성검법',
+        type: '검법',
+        tier: '중류',
+        icon: '☯️',
+        learnable: 'sect',
+        sectFamily: '청성파',
+        desc: '청성파 제자에게 전수되는 도가 검법.',
+        effectDesc: '공격력·방어력 보정',
+        maxLevel: 15,
+        potentialMax: 20,
+        perLevel: { atk: 1.8, def: 1.2 },
+    },
+    cheongseong_step: {
+        id: 'cheongseong_step',
+        name: '청성보법',
+        type: '보법',
+        tier: '중류',
+        icon: '🍃',
+        learnable: 'sect',
+        sectFamily: '청성파',
+        desc: '청성 심법에 맞춘 가벼운 보법.',
+        effectDesc: '공격·회피 보정',
+        maxLevel: 15,
+        potentialMax: 20,
+        perLevel: { atk: 1, evasion: 2.5 },
+    },
+    emei_sword: {
+        id: 'emei_sword',
+        name: '아미검법',
+        type: '검법',
+        tier: '중류',
+        icon: '🔔',
+        learnable: 'sect',
+        sectFamily: '아미파',
+        desc: '아미파 여협 검법의 기초.',
+        effectDesc: '공격력·방어력 보정',
+        maxLevel: 15,
+        potentialMax: 20,
+        perLevel: { atk: 1.6, def: 1.4 },
+    },
+    emei_step: {
+        id: 'emei_step',
+        name: '아미보법',
+        type: '보법',
+        tier: '중류',
+        icon: '🪷',
+        learnable: 'sect',
+        sectFamily: '아미파',
+        desc: '금정에서 익히는 여협 보법.',
+        effectDesc: '공격·회피 보정',
+        maxLevel: 15,
+        potentialMax: 20,
+        perLevel: { atk: 0.8, evasion: 3 },
+    },
+    sogeom_sword: {
+        id: 'sogeom_sword',
+        name: '소검술',
+        type: '검법',
+        tier: '중류',
+        icon: '⚔️',
+        learnable: 'sect',
+        sectFamily: '소검파',
+        desc: '소검파의 경량 검술.',
+        effectDesc: '공격력·방어력 보정',
+        maxLevel: 15,
+        potentialMax: 20,
+        perLevel: { atk: 2, def: 0.8 },
+    },
+    tang_hidden: {
+        id: 'tang_hidden',
+        name: '당가암기',
+        type: '보법',
+        tier: '중류',
+        icon: '🎯',
+        learnable: 'sect',
+        sectFamily: '당가',
+        desc: '당가 외가의 기본 암기술.',
+        effectDesc: '공격·회피 보정',
+        maxLevel: 15,
+        potentialMax: 20,
+        perLevel: { atk: 1.2, evasion: 2.2 },
+    },
+    sapa_brutal: {
+        id: 'sapa_brutal',
+        name: '혈煞拳',
+        type: '검법',
+        tier: '중류',
+        icon: '🩸',
+        learnable: 'sect',
+        sectFamily: '산적소굴',
+        desc: '사파 무인에게 전수되는 난투 무공.',
+        effectDesc: '공격력·방어력 보정',
+        maxLevel: 15,
+        potentialMax: 20,
+        perLevel: { atk: 2.2, def: 0.6 },
+    },
 };
 
 const BASE_EVASION = 5;
@@ -111,6 +210,29 @@ export function initMartialArts(gs = state.gameState) {
 
 export function isNaegongUnlocked(gs = state.gameState) {
     return !!gs.naegongUnlocked;
+}
+
+export function getMartialExpToLevel(level) {
+    return Math.max(20, level * 20);
+}
+
+/** 전투 승리 시 무공 숙련 */
+export function calcMartialVictoryExp(enemy, opts = {}) {
+    let base;
+    if (enemy.named) {
+        base = 24 + Math.floor((enemy.expReward || 30) / 3);
+    } else {
+        const hp = enemy.maxHp || enemy.hp || 40;
+        base = Math.max(4, Math.floor(hp / 10) + 2);
+    }
+    if (opts.manual) base = Math.floor(base * 1.35);
+    return base;
+}
+
+export function applyMartialVictoryExp(enemy, opts = {}) {
+    const gain = calcMartialVictoryExp(enemy, opts);
+    const levelUps = gainMartialEnlightenmentExp(gain);
+    return { gain, levelUps };
 }
 
 export function gainMartialEnlightenmentExp(totalExp) {
@@ -146,8 +268,8 @@ function applyMartialExp(entry, def, amount) {
     const ups = [];
     entry.exp = (entry.exp || 0) + amount;
     const cap = Math.min(def.maxLevel, def.potentialMax);
-    while (entry.level < cap && entry.exp >= entry.level * 20) {
-        entry.exp -= entry.level * 20;
+    while (entry.level < cap && entry.exp >= getMartialExpToLevel(entry.level)) {
+        entry.exp -= getMartialExpToLevel(entry.level);
         entry.level += 1;
         ups.push({ id: def.id, name: def.name, level: entry.level });
     }
@@ -218,41 +340,76 @@ export function recalcCombatStats(gs = state.gameState) {
     const b = gs._baseStats;
     const martial = getMartialBonuses(gs);
 
-    let gearAtk = 0, gearDef = 0, gearHp = 0;
-    for (const item of gs.inventory || []) {
-        if (item.type !== 'gear') continue;
-        gearAtk += item.atk || 0;
-        gearDef += item.def || 0;
-        gearHp += item.maxHp || 0;
-    }
+    const gear = inventory.getGearBonuses(gs);
 
     const hpRatio = gs.maxHp > 0 ? gs.hp / gs.maxHp : 1;
-    const newMaxHp = b.maxHp + gearHp;
-    gs.atk = b.atk + martial.atk + gearAtk;
-    gs.def = b.def + martial.def + gearDef;
+    const newMaxHp = b.maxHp + gear.maxHp;
+    gs.atk = b.atk + martial.atk + gear.atk;
+    gs.def = b.def + martial.def + gear.def;
     gs.maxHp = newMaxHp;
     gs.hp = Math.min(newMaxHp, Math.max(1, Math.floor(hpRatio * newMaxHp)));
-    gs.evasion = BASE_EVASION + martial.evasion;
+    gs.evasion = BASE_EVASION + martial.evasion + gear.evasion;
     gs._baseEvasion = BASE_EVASION;
 }
 
-/** 기연·수련 등으로 무공 습득 (향후 이벤트용) */
+function pushLearnedArt(gs, def, level, silent = false) {
+    if (!gs.martialArts) gs.martialArts = { learned: [] };
+    const existing = gs.martialArts.learned.find(a => a.id === def.id);
+    const targetLevel = Math.min(def.potentialMax, Math.max(1, level));
+    if (existing) {
+        const was = existing.level;
+        existing.level = Math.max(existing.level, targetLevel);
+        recalcCombatStats(gs);
+        return { learned: false, leveled: existing.level > was, level: existing.level, name: def.name };
+    }
+    gs.martialArts.learned.push({
+        id: def.id,
+        level: Math.min(def.maxLevel, targetLevel),
+        exp: 0,
+    });
+    if (!silent) state.addLog(`📜 ${def.name}을(를) 익혔다! (${def.tier} ${def.type})`);
+    recalcCombatStats(gs);
+    return { learned: true, leveled: false, level: Math.min(def.maxLevel, targetLevel), name: def.name };
+}
+
+/** 기연·수련 등으로 무공 습득 */
 export function learnMartialArt(artId, level = 1) {
-    const gs = state.gameState;
     const def = getArtDef(artId);
     if (!def) return false;
-    if (!gs.martialArts) gs.martialArts = { learned: [] };
-    const existing = gs.martialArts.learned.find(a => a.id === artId);
-    if (existing) {
-        existing.level = Math.min(def.potentialMax, Math.max(existing.level, level));
-        recalcCombatStats(gs);
-        return true;
-    }
     if (def.learnable !== 'kiyeon' && def.learnable !== 'common') return false;
-    gs.martialArts.learned.push({ id: artId, level: Math.min(def.maxLevel, level), exp: 0 });
-    state.addLog(`📜 ${def.name}을(를) 익혔다! (${def.tier} ${def.type})`);
+    return !!pushLearnedArt(state.gameState, def, level).name;
+}
+
+/** 문파 입문 권유 시 전수 */
+export function learnSectMartialArt(artId, level = 1) {
+    const def = getArtDef(artId);
+    if (!def || def.learnable !== 'sect') return null;
+    return pushLearnedArt(state.gameState, def, level);
+}
+
+/** 지정 무공에만 숙련도 부여 */
+export function grantMartialExpToArts(artIds, totalExp, gs = state.gameState) {
+    if (!totalExp || !artIds?.length) return [];
+    const learned = gs.martialArts?.learned || [];
+    const targets = artIds
+        .map(id => learned.find(a => a.id === id))
+        .filter(Boolean);
+    if (!targets.length) return [];
+
+    const perArt = Math.floor(totalExp / targets.length);
+    let remainder = totalExp - perArt * targets.length;
+    const levelUps = [];
+
+    for (const entry of targets) {
+        const def = getArtDef(entry.id);
+        if (!def) continue;
+        const gain = perArt + (remainder > 0 ? 1 : 0);
+        if (remainder > 0) remainder -= 1;
+        levelUps.push(...applyMartialExp(entry, def, gain));
+    }
+
     recalcCombatStats(gs);
-    return true;
+    return levelUps;
 }
 
 export function formatArtBonuses(bonuses, def) {
@@ -274,8 +431,11 @@ export function renderMartialArtsPanel(gs = state.gameState) {
 
     const learnedHtml = learned.map(({ def, level, exp, bonuses }) => {
         const tier = TIER_META[def.tier] || TIER_META.하류;
-        const expNeed = level * 20;
+        const expNeed = getMartialExpToLevel(level);
         const expPct = Math.min(100, Math.floor((exp / expNeed) * 100));
+        const perLv = def.type === '검법'
+            ? `공격+${def.perLevel.atk || 0} · 방어+${def.perLevel.def || 0}`
+            : `공격+${def.perLevel.atk || 0} · 회피+${def.perLevel.evasion || 0}`;
         return `
             <div class="martial-card">
                 <div class="flex items-start justify-between gap-2 mb-2">
@@ -291,10 +451,17 @@ export function renderMartialArtsPanel(gs = state.gameState) {
                     <span class="text-amber-400 font-bold">Lv.${level}</span>
                     <span class="text-zinc-500">최대 Lv.${def.maxLevel} · 잠재 Lv.${def.potentialMax}</span>
                 </div>
+                <div class="flex justify-between text-xs text-zinc-500 mb-1">
+                    <span>숙련</span>
+                    <span class="text-blue-300">${exp} / ${expNeed}</span>
+                </div>
                 <div class="hp-bar mb-2"><div class="hp-fill ng-fill" style="width:${expPct}%"></div></div>
                 <div class="text-xs text-zinc-400">
-                    <span class="text-zinc-500">${def.effectDesc}:</span>
+                    <span class="text-zinc-500">현재 보정:</span>
                     <span class="text-emerald-400 font-medium">${formatArtBonuses(bonuses, def)}</span>
+                    <span class="text-zinc-600 mx-1">·</span>
+                    <span class="text-zinc-500">Lv당</span>
+                    <span class="text-zinc-400">${perLv}</span>
                 </div>
             </div>
         `;
@@ -326,7 +493,10 @@ export function renderMartialArtsPanel(gs = state.gameState) {
     return `
         <div class="mt-4">
             <h4 class="text-sm text-zinc-500 mb-2"><i class="fas fa-yin-yang mr-1"></i>습득 무공</h4>
-            <p class="text-xs text-zinc-600 mb-3">기초 무공만 익힌 상태. 상승·일류 무공은 기연을 만나야 배울 수 있다.</p>
+            <p class="text-xs text-zinc-600 mb-3">
+                숙련은 <span class="text-blue-300">전투 승리</span>·<span class="text-amber-300">깨달음</span>·<span class="text-emerald-300">기연 숙소(장소당 1회)</span>·<span class="text-cyan-300">네임드 사사</span>로 쌓인다.
+                Lv업 필요 숙련 = <span class="text-zinc-400">현재 Lv × 20</span> · 보정 = <span class="text-zinc-400">레벨당 수치 × Lv</span>
+            </p>
             <div class="space-y-3">${learnedHtml}</div>
             <div class="mt-3 text-xs text-center text-zinc-500 bg-zinc-800/40 rounded-lg py-2">
                 회피율 <span class="text-cyan-400 font-bold">${evRate}%</span>

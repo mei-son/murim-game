@@ -12,7 +12,26 @@ const INN = { hpRate: 0.55, ngRate: 0.55, oneStat: false, days: 1 };
 const PREMIUM = { hpRate: 1, ngRate: 1, oneStat: false, exp: 18, days: 1 };
 
 const INN_COST = { metropolis: 28, city: 22, town: 16, village: 10, remote: 14, pass: 12 };
-const KIYEON_SPOTS = new Set(['청성산', '峨嵋금정', '약초원', '도관', '금정대전', '산사']);
+const KIYEON_SPOTS = new Set(['청성산', '아미금정', '약초원', '도관', '금정대전', '산사']);
+export const KIYEON_REST_COOLDOWN_DAYS = 7;
+export const SECT_LODGE_AFFINITY_COST = 5;
+
+function initKiyeonTracking(gs) {
+    if (!gs.kiyeonExpClaimed) gs.kiyeonExpClaimed = [];
+    if (!gs.kiyeonRestLog) gs.kiyeonRestLog = {};
+}
+
+export function hasClaimedKiyeonExp(gs, spotId = gs.currentLocation) {
+    initKiyeonTracking(gs);
+    return gs.kiyeonExpClaimed.includes(spotId);
+}
+
+function claimKiyeonExp(gs, spotId = gs.currentLocation) {
+    initKiyeonTracking(gs);
+    if (hasClaimedKiyeonExp(gs, spotId)) return false;
+    gs.kiyeonExpClaimed.push(spotId);
+    return true;
+}
 
 function applyRecovery(gs, rates, fullRestore = false) {
     const ngOk = martial.isNaegongUnlocked(gs);
@@ -43,22 +62,15 @@ function hasInn(gs) {
     return ['metropolis', 'city', 'town'].includes(profile.scale);
 }
 
-function getInnNotice(gs) {
-    if (hasInn(gs)) return null;
-    const profile = places.getPlaceProfile(gs.currentLocation, gs.currentArea);
-    const scale = places.getScaleInfo(profile.scale);
-    if (profile.scale === 'village') {
-        return '시골 촌락이라 숙박할 만한 숙소가 없다. 노숙만 가능하다.';
-    }
-    if (profile.scale === 'pass' || profile.scale === 'remote') {
-        return '험한 곳이라 여관이 없다. 노숙밖에 할 수 없다.';
-    }
-    return `${scale.label}이지만 숙박 가능한 숙소가 없다. 노숙만 가능하다.`;
-}
-
 function getInnCost(gs) {
     const profile = places.getPlaceProfile(gs.currentLocation, gs.currentArea);
     return INN_COST[profile.scale] ?? 12;
+}
+
+function getSectLodgingNeed(tier) {
+    if (tier === '본문') return 15;
+    if (tier === '분파') return 28;
+    return 40;
 }
 
 /** 기연 숙소 — 특정 명승·산중 거점 */
@@ -66,7 +78,27 @@ export function canKiyeonRest(gs) {
     return KIYEON_SPOTS.has(gs.currentLocation);
 }
 
-/** 거대 문파(본문) 우호 숙박 */
+/** 기연 숙소 이용 가능 (쿨다운) */
+export function getKiyeonRestAccess(gs) {
+    const spot = gs.currentLocation;
+    if (!canKiyeonRest(gs)) return { ok: false, reason: 'none' };
+    initKiyeonTracking(gs);
+    const last = gs.kiyeonRestLog[spot];
+    if (last != null && gs.day - last < KIYEON_REST_COOLDOWN_DAYS) {
+        return {
+            ok: false,
+            reason: 'cooldown',
+            waitDays: KIYEON_REST_COOLDOWN_DAYS - (gs.day - last),
+        };
+    }
+    return {
+        ok: true,
+        firstExp: !hasClaimedKiyeonExp(gs, spot),
+        cooldownDays: KIYEON_REST_COOLDOWN_DAYS,
+    };
+}
+
+/** 문파 우호 숙박 */
 export function getSectLodgingOption(gs) {
     const profile = places.getPlaceProfile(gs.currentLocation, gs.currentArea);
     let best = null;
@@ -74,15 +106,19 @@ export function getSectLodgingOption(gs) {
         const sect = sects.getSect(sectId);
         if (!sect) continue;
         const aff = sects.getAffinity(sectId);
-        if (sect.tier === '본문' && aff >= 15) {
-            best = { sectId, sect, aff, need: 15 };
-        } else if (sect.tier === '분파' && aff >= 28 && (!best || best.sect.tier !== '본문')) {
-            best = { sectId, sect, aff, need: 28 };
-        } else if (sect.tier === '속가' && aff >= 40 && !best) {
-            best = { sectId, sect, aff, need: 40 };
+        const need = getSectLodgingNeed(sect.tier);
+        if (aff < need || aff <= 0) continue;
+        if (!best || aff > best.aff) {
+            best = { sectId, sect, aff, need, cost: SECT_LODGE_AFFINITY_COST };
         }
     }
     return best;
+}
+
+/** 우호·기연 숙소가 열려 있으면 일반 숙박 숨김 */
+export function hasActivePremiumLodging(gs) {
+    if (getSectLodgingOption(gs)) return true;
+    return getKiyeonRestAccess(gs).ok;
 }
 
 export function getRestOptions(gs) {
@@ -95,7 +131,7 @@ export function getRestOptions(gs) {
         cost: 0,
     }];
 
-    if (hasInn(gs)) {
+    if (hasInn(gs) && !hasActivePremiumLodging(gs)) {
         const cost = getInnCost(gs);
         opts.push({
             id: 'inn',
@@ -114,47 +150,49 @@ export function getRestOptions(gs) {
             icon: lodging.sect.icon,
             label: `${lodging.sect.name} 숙박`,
             desc: `우호 ${lodging.aff} — 문파 초대 숙소`,
-            detail: '전폭 회복 · 경험치 · 1일',
+            detail: `전폭 회복 · 경험치 · 우호 -${lodging.cost} · 1일`,
             cost: 0,
             sectId: lodging.sectId,
         });
     }
 
-    if (canKiyeonRest(gs)) {
+    const kiyeon = getKiyeonRestAccess(gs);
+    if (kiyeon.ok) {
         opts.push({
             id: 'kiyeon',
             icon: '✨',
             label: '기연 숙소',
             desc: '산중 기연·명승지',
-            detail: '전폭 회복 · 경험치 증가 · 1일',
+            detail: kiyeon.firstExp
+                ? `전폭 회복 · 경험치·무공 숙련 (장소당 1회) · ${kiyeon.cooldownDays}일마다 1회 · 1일`
+                : `전폭 회복 · 기연 체득 완료 · ${kiyeon.cooldownDays}일마다 1회 · 1일`,
             cost: 0,
+            kiyeonFirstExp: kiyeon.firstExp,
         });
     }
 
     return opts;
 }
 
-export function getRestMenuMeta(gs) {
-    const innAvailable = hasInn(gs);
-    return {
-        innAvailable,
-        notice: innAvailable ? null : getInnNotice(gs),
-    };
+export function getRestMenuMeta() {
+    return { innAvailable: false, notice: null };
 }
 
 export function performRest(type, sectId) {
     const gs = state.gameState;
 
     if (type === 'camp') {
-        if (Math.random() < 0.08 && !KIYEON_SPOTS.has(gs.currentLocation)) {
+        if (Math.random() < 0.08 && !KIYEON_SPOTS.has(gs.currentLocation) && !hasClaimedKiyeonExp(gs)) {
             state.addLog('🌙 노숙 중 기연의 기운이 느껴진다…');
-            doPremiumRest('🌟 노숙 중 기연을 만나 체력이 가득 차고 심득이 든다.');
+            claimKiyeonExp(gs);
+            doPremiumRest('🌟 노숙 중 기연을 만나 체력이 가득 차고 심득이 든다.', { firstKiyeon: true });
             closeRestMenu();
             ui.updateAllUI();
             return;
         }
         applyRecovery(gs, CAMP);
         gs.day += CAMP.days;
+        sects.onDayAdvanced(gs, 'rest');
         state.addLog(`🌙 길에서 노숙. 체력만 ${Math.round(CAMP.hpRate * 100)}% 회복 (제 ${gs.day}일)`);
         closeRestMenu();
         ui.updateAllUI();
@@ -162,6 +200,10 @@ export function performRest(type, sectId) {
     }
 
     if (type === 'inn') {
+        if (hasActivePremiumLodging(gs)) {
+            ui.updateAllUI();
+            return;
+        }
         const cost = getInnCost(gs);
         if (gs.gold < cost) {
             state.addLog(`숙박비 ${cost}냥이 필요하다.`);
@@ -171,6 +213,7 @@ export function performRest(type, sectId) {
         state.modifyStats({ gold: gs.gold - cost });
         applyRecovery(gs, INN);
         gs.day += INN.days;
+        sects.onDayAdvanced(gs, 'rest');
         state.addLog(`🏨 숙박하여 하룻밤. 체력·내공 ${Math.round(INN.hpRate * 100)}% 회복 (${cost}냥, 제 ${gs.day}일)`);
         closeRestMenu();
         ui.updateAllUI();
@@ -180,28 +223,63 @@ export function performRest(type, sectId) {
     if (type === 'sect' && sectId) {
         const sect = sects.getSect(sectId);
         if (!sect) return;
+        const lodging = getSectLodgingOption(gs);
+        if (!lodging || lodging.sectId !== sectId) {
+            ui.updateAllUI();
+            return;
+        }
+        const { next, spent } = sects.spendAffinity(sectId, SECT_LODGE_AFFINITY_COST);
+        if (spent <= 0) {
+            ui.updateAllUI();
+            return;
+        }
         applyRecovery(gs, PREMIUM, true);
         gs.day += PREMIUM.days;
+        sects.onDayAdvanced(gs, 'rest');
         state.gainExp(PREMIUM.exp + gs.level * 2);
-        const aff = sects.modifyAffinity(sectId, 2);
-        state.addLog(`🏠 ${sect.name} 초대 숙박. 전폭 회복·경험치 (우호 +2, ${sects.getAffinityLabel(aff).label}, 제 ${gs.day}일)`);
+        state.addLog(`🏠 ${sect.name} 초대 숙박. 전폭 회복·경험치 (우호 -${spent}, ${sects.getAffinityLabel(next).label}, 제 ${gs.day}일)`);
         closeRestMenu();
         ui.updateAllUI();
         return;
     }
 
     if (type === 'kiyeon') {
-        doPremiumRest('✨ 기연 숙소에서 몸과 심법이 한층 깊어졌다.');
+        const access = getKiyeonRestAccess(gs);
+        if (!access.ok) {
+            ui.updateAllUI();
+            return;
+        }
+        const spot = gs.currentLocation;
+        initKiyeonTracking(gs);
+        gs.kiyeonRestLog[spot] = gs.day;
+        const firstKiyeon = access.firstExp && claimKiyeonExp(gs, spot);
+        if (firstKiyeon) {
+            doPremiumRest('✨ 기연 숙소에서 몸과 심법이 한층 깊어졌다.', { firstKiyeon: true });
+        } else {
+            applyRecovery(gs, PREMIUM, true);
+            gs.day += PREMIUM.days;
+            sects.onDayAdvanced(gs, 'rest');
+            state.addLog(`✨ 기연 숙소에서 몸을 추스렸다. (제 ${gs.day}일)`);
+        }
         closeRestMenu();
         ui.updateAllUI();
     }
 }
 
-function doPremiumRest(logText) {
+function doPremiumRest(logText, { firstKiyeon = true } = {}) {
     const gs = state.gameState;
     applyRecovery(gs, PREMIUM, true);
     gs.day += PREMIUM.days;
-    state.gainExp(PREMIUM.exp + gs.level * 3);
+    sects.onDayAdvanced(gs, 'rest');
+    if (firstKiyeon) {
+        state.gainExp(PREMIUM.exp + gs.level * 3);
+        const martialUps = martial.gainMartialEnlightenmentExp(32 + gs.level * 3);
+        const upNote = martialUps.length
+            ? ` · 무공 ${martialUps.map(u => `${u.name} Lv.${u.level}`).join(', ')}`
+            : ' · 무공 숙련 상승';
+        state.addLog(`${logText} (경험치·무공 기연${upNote}, 제 ${gs.day}일)`);
+        return;
+    }
     state.addLog(`${logText} (제 ${gs.day}일)`);
 }
 

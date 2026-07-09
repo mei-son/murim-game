@@ -1,14 +1,20 @@
 import { NAEGONG_UNLOCK_LEVEL, getRealm } from './realm.js';
 
+/** 협행·악행 100당 명성·악명 1 */
+export const REPUTATION_PER_POINT = 100;
+
 export let gameState = {
     fame: 0,
     notoriety: 0,
-    chivalry: 0,
+    hyeophaeng: 0,
+    aekhaeng: 0,
     hp: 120,
     maxHp: 120,
     naegong: 0,
     maxNaegong: 0,
     naegongUnlocked: false,
+    naegongLevel: 1,
+    naegongExp: 0,
     atk: 18,
     def: 12,
     level: 1,
@@ -23,19 +29,28 @@ export let gameState = {
     visitedRegions: ['사천'],
     visitedAreas: ['촉남촌'],
     visitedLocations: ['촉남촌'],
+    /** 탐색·정보 수집으로 파악한 정소 — 없으면 지도에 ❓ */
+    discoveredSpots: ['촉남촌'],
     heardCriminalRumor: false,
     savedWanderer: false,
     defeatedBandit: false,
     eventLog: [],
     currentEvent: null,
-    autoBattle: true,
+    autoBattle: false,
     inventory: [],
+    equipped: { weapon: null, armor: null },
     defeatedNamed: [],
     defeatedHeukSaryong: false,
     defeatedHyeolmaGeom: false,
     defeatedCheongpung: false,
     defeatedDoksaGungju: false,
     sectAffinity: {},
+    /** 문파별 일일 대련 횟수 { [sectId]: { day, count } } */
+    sectSparLog: {},
+    /** 문파별 누적 대련 횟수 */
+    sectSparLifetime: {},
+    /** 문파별 일일 견식 횟수 { [sectId]: { day, count } } */
+    sectObserveLog: {},
     sectStanding: null,
     placeUI: null,
     hero: {
@@ -50,6 +65,17 @@ export let gameState = {
     },
     intelJournal: [],
     intelGatherAttempts: 0,
+    intelStayArea: '촉남촌',
+    intelGathersThisStay: 0,
+    intelStayLimit: 0,
+    exploreCooldowns: {},
+    /** 기연 숙소·노숙 기연 — 장소당 캐릭터/무공 경험 1회 */
+    kiyeonExpClaimed: [],
+    /** 기연 숙소 이용일 { [장소]: day } */
+    kiyeonRestLog: {},
+    quests: {},
+    didCheongseongTrain: false,
+    passedEmeiTrial: false,
     martialArts: {
         learned: [
             { id: 'samjae_sword', level: 1, exp: 0 },
@@ -68,60 +94,91 @@ export const locations = [
     { id: '성도부', icon: '🏯', desc: '촉중 제일의 번화 도시. 강호 각가의 정보가 모인다.' },
     { id: '청성산', icon: '☯️', desc: '도가 명문 청성파가 있는 명산.' },
     { id: '검각관', icon: '⚠️', desc: '산적과 사파 무인이 출몰하는 험한 관문.' },
-    { id: '峨嵋금정', icon: '🔔', desc: '峨嵋파 본산. 정파 여협의 성지.' },
+    { id: '아미금정', icon: '🔔', desc: '아미파 본산. 정파 여협의 성지.' },
 ];
 
+export function syncFame() {
+    gameState.fame = Math.floor(gameState.hyeophaeng / REPUTATION_PER_POINT);
+}
+
+export function syncNotoriety() {
+    gameState.notoriety = Math.floor(gameState.aekhaeng / REPUTATION_PER_POINT);
+}
+
 /**
- * 협의 변동 — 양립불가
- * 협의↑ → 명성↑ / 협의↓ → 악명↑ (동시에 오르지 않음)
+ * 협행 변동 — 도덕 선택
+ * 협행↑ → (100당) 명성↑ / 협행↓ → 악행↑ → (100당) 악명↑
  */
-export function applyChivalryChange(delta) {
+export function applyHyeophaengChange(delta) {
     if (!delta) return;
     const gs = gameState;
     if (delta > 0) {
-        gs.chivalry += delta;
-        gs.fame += delta;
+        gs.hyeophaeng += delta;
     } else {
         const loss = Math.abs(delta);
-        gs.chivalry = Math.max(0, gs.chivalry - loss);
-        gs.notoriety += loss;
+        gs.hyeophaeng = Math.max(0, gs.hyeophaeng - loss);
+        gs.aekhaeng += loss;
+        syncNotoriety();
     }
+    syncFame();
+}
+
+/** 협행 직접 추가 (전투·아이템 보상 등) */
+export function addHyeophaeng(amount) {
+    if (!amount) return;
+    gameState.hyeophaeng += amount;
+    syncFame();
+}
+
+/** 악행 직접 추가 */
+export function addAekhaeng(amount) {
+    if (!amount) return;
+    gameState.aekhaeng += amount;
+    syncNotoriety();
 }
 
 function applyReputationChanges(changes) {
     const gs = gameState;
-    let chivalryDelta = 0;
 
-    if ('chivalry' in changes) {
-        chivalryDelta += changes.chivalry - gs.chivalry;
-        delete changes.chivalry;
+    if ('hyeophaeng' in changes) {
+        gs.hyeophaeng = Math.max(0, changes.hyeophaeng);
+        delete changes.hyeophaeng;
+        syncFame();
     }
     if ('fame' in changes) {
         const fameDelta = changes.fame - gs.fame;
-        if (fameDelta > 0) chivalryDelta += fameDelta;
-        else gs.fame = Math.max(0, changes.fame);
+        if (fameDelta !== 0) {
+            gs.hyeophaeng = Math.max(0, gs.hyeophaeng + fameDelta * REPUTATION_PER_POINT);
+        }
         delete changes.fame;
+        syncFame();
+    }
+    if ('aekhaeng' in changes) {
+        gs.aekhaeng = Math.max(0, changes.aekhaeng);
+        delete changes.aekhaeng;
+        syncNotoriety();
     }
     if ('notoriety' in changes) {
-        const ngDelta = changes.notoriety - gs.notoriety;
-        if (ngDelta > 0) chivalryDelta -= ngDelta;
-        else gs.notoriety = Math.max(0, changes.notoriety);
+        const notDelta = changes.notoriety - gs.notoriety;
+        if (notDelta !== 0) {
+            gs.aekhaeng = Math.max(0, gs.aekhaeng + notDelta * REPUTATION_PER_POINT);
+        }
         delete changes.notoriety;
+        syncNotoriety();
     }
-
-    if (chivalryDelta > 0) applyChivalryChange(chivalryDelta);
-    else if (chivalryDelta < 0) applyChivalryChange(chivalryDelta);
 }
 
 export function modifyStats(changes) {
     const rep = {};
-    if ('chivalry' in changes) rep.chivalry = changes.chivalry;
+    if ('hyeophaeng' in changes) rep.hyeophaeng = changes.hyeophaeng;
     if ('fame' in changes) rep.fame = changes.fame;
+    if ('aekhaeng' in changes) rep.aekhaeng = changes.aekhaeng;
     if ('notoriety' in changes) rep.notoriety = changes.notoriety;
     if (Object.keys(rep).length) {
         const rest = { ...changes };
-        delete rest.chivalry;
+        delete rest.hyeophaeng;
         delete rest.fame;
+        delete rest.aekhaeng;
         delete rest.notoriety;
         applyReputationChanges(rep);
         Object.assign(gameState, rest);
@@ -151,6 +208,7 @@ export function addLog(text) {
 export function advanceDays(days, destination) {
     if (days <= 0) return;
     gameState.day += days;
+    import('./sects.js').then(s => s.onDayAdvanced(gameState, 'travel'));
     addLog(`🚶 ${days}일 소요 — ${destination}(에) 도착 (제 ${gameState.day}일)`);
     if (days >= 3) {
         const fatigue = Math.floor(days / 3);
@@ -181,8 +239,34 @@ export function checkNaegongUnlock() {
     gs.naegongUnlocked = true;
     gs.maxNaegong = 60;
     gs.naegong = 60;
+    gs.naegongLevel = 1;
+    gs.naegongExp = 0;
     addLog(`🌀 삼류 중반의 경지에 이르러 단전이 열렸다! 내공을 다룰 수 있게 되었다. (Lv.${unlockLevel})`);
     return true;
+}
+
+/** 전투 승리 등으로 내공 숙련 상승 — 개통 후에만 적용 */
+export function gainNaegongExp(amount) {
+    const gs = gameState;
+    if (!amount || !gs.naegongUnlocked) return null;
+    if (!gs.naegongLevel) gs.naegongLevel = 1;
+    if (gs.naegongExp == null) gs.naegongExp = 0;
+
+    gs.naegongExp += amount;
+    const leveled = [];
+    while (gs.naegongExp >= gs.naegongLevel * 30) {
+        gs.naegongExp -= gs.naegongLevel * 30;
+        gs.naegongLevel += 1;
+        gs.maxNaegong += 10;
+        leveled.push(gs.naegongLevel);
+    }
+    if (gs.naegong > gs.maxNaegong) gs.naegong = gs.maxNaegong;
+
+    for (const lv of leveled) {
+        addLog(`🌀 내공 숙련 상승! 내공 Lv.${lv} (최대 내공 +10)`);
+    }
+
+    return { gained: amount, level: gs.naegongLevel, leveled };
 }
 
 export function levelUp() {

@@ -10,6 +10,7 @@ import * as hero from './hero.js';
 import * as realm from './realm.js';
 import * as enlightenment from './enlightenment.js';
 import * as intel from './intel.js';
+import * as inventory from './inventory.js';
 
 let infoTab = 'character';
 
@@ -132,19 +133,45 @@ export function renderToolbar() {
         ngFillEl.style.width = `${pct}%`;
         ngFillEl.parentElement?.classList.toggle('opacity-40', !ngUnlocked);
     }
-    const items = gs.inventory || [];
-    if (invCountEl) invCountEl.textContent = items.length;
+    inventory.initInventory(gs);
+    const bag = gs.inventory || [];
+    const equippedCount = Object.values(gs.equipped || {}).filter(Boolean).length;
+    if (invCountEl) invCountEl.textContent = bag.length + equippedCount;
     if (invListEl) {
-        invListEl.innerHTML = items.length
-            ? items.map(item => `
+        const slotRows = Object.entries(inventory.GEAR_SLOTS).map(([slot, label]) => {
+            const id = gs.equipped?.[slot];
+            const item = id ? inventory.getItemDef(id) : null;
+            return `
+                <div class="inv-pop-item inv-pop-slot">
+                    <span class="text-zinc-500 text-xs">${label}</span>
+                    ${item ? `
+                    <span>${item.icon} ${item.name}</span>
+                    <button onclick="window.unequipItem('${slot}')"
+                        class="px-2 py-0.5 text-xs bg-zinc-700 hover:bg-zinc-600 rounded choice-btn">해제</button>`
+                    : '<span class="text-zinc-600 text-xs">비어 있음</span>'}
+                </div>`;
+        }).join('');
+        const bagRows = bag.length
+            ? bag.map(item => `
                 <div class="inv-pop-item">
                     <span>${item.icon} ${item.name}</span>
                     ${item.type === 'consumable' ? `
                     <button onclick="window.useItem('${item.id}')"
-                        class="px-2 py-0.5 text-xs bg-amber-800 hover:bg-amber-700 rounded choice-btn">사용</button>` : `
-                    <span class="text-xs text-zinc-500">장비</span>`}
+                        class="px-2 py-0.5 text-xs bg-amber-800 hover:bg-amber-700 rounded choice-btn">사용</button>`
+                    : item.slot === 'weapon' ? `
+                    <button onclick="window.equipItem('${item.id}')"
+                        class="px-2 py-0.5 text-xs bg-orange-900 hover:bg-orange-800 rounded choice-btn">장착</button>`
+                    : `
+                    <button onclick="window.equipItem('${item.id}')"
+                        class="px-2 py-0.5 text-xs bg-emerald-900 hover:bg-emerald-800 rounded choice-btn">착용</button>`}
                 </div>`).join('')
-            : '<p class="inv-pop-empty">소지품이 없습니다</p>';
+            : '';
+        invListEl.innerHTML = `
+            <div class="text-[0.65rem] text-amber-500/80 font-bold mb-1">장착</div>
+            ${slotRows}
+            <div class="text-[0.65rem] text-zinc-500 font-bold mt-2 mb-1">가방 (${bag.length})</div>
+            ${bagRows || '<p class="inv-pop-empty">가방이 비었다</p>'}
+        `;
     }
     if (invPopover) {
         invPopover.classList.toggle('hidden', !inventoryPopoverOpen);
@@ -156,8 +183,8 @@ export function renderToolbar() {
             ? '<i class="fas fa-robot mr-2"></i><span>자동전투</span><span class="toggle-badge on">ON</span>'
             : '<i class="fas fa-hand-paper mr-2"></i><span>자동전투</span><span class="toggle-badge off">OFF</span>';
         toggleEl.title = on
-            ? '클릭하여 OFF — 전투·이동 조우 시 수동 전투'
-            : '클릭하여 ON — 전투·이동 조우 시 자동 처리';
+            ? '클릭하여 OFF — 수동 전투(경험치 보너스 +50%)'
+            : '클릭하여 ON — 자동 전투(기본 경험치)';
         toggleEl.setAttribute('aria-pressed', on ? 'true' : 'false');
     }
 }
@@ -168,7 +195,7 @@ function renderStats() {
     const cards = [
         { label: '명성', value: gs.fame, icon: 'fa-star', color: 'text-yellow-400' },
         { label: '악명', value: gs.notoriety, icon: 'fa-skull', color: 'text-red-400' },
-        { label: '협의', value: gs.chivalry, icon: 'fa-hand-holding-heart', color: 'text-blue-400' },
+        { label: '협행', value: gs.hyeophaeng, icon: 'fa-hand-holding-heart', color: 'text-blue-400' },
         { label: '체력', value: `${gs.hp}/${gs.maxHp}`, icon: 'fa-heart', color: 'text-rose-400' },
         { label: '내공', value: martial.isNaegongUnlocked(gs) ? `${gs.naegong}/${gs.maxNaegong}` : '내공 미타동', icon: 'fa-fire', color: 'text-orange-400' },
     ];
@@ -193,7 +220,11 @@ function renderStats() {
 function getMapContext(gs) {
     if (gs.mapView === 'local') {
         const area = gs.currentArea;
+        const regionId = gs.currentRegion;
         return {
+            mapLevel: 'local',
+            areaId: area,
+            regionId,
             layout: map.localNodeLayout[area],
             connections: map.localMaps[area]?.connections ?? {},
             current: gs.currentLocation,
@@ -202,12 +233,17 @@ function getMapContext(gs) {
             subtitle: `📍 ${gs.currentLocation}`,
             getDays: (to) => map.getLocalTravelDays(area, gs.currentLocation, to),
             canReach: (to) => map.canTravelLocal(area, gs.currentLocation, to),
+            canNavigate: () => true,
             getIcon: (id) => map.getLocalSpotIcon(area, id),
-            getLabel: (id) => id,
+            getLabel: (id) => map.getMapNodeLabel(gs, id, 'local', area, regionId),
+            getNodeIcon: (id) => map.getMapNodeIcon(gs, id, map.getLocalSpotIcon(area, id), 'local', area, regionId),
         };
     }
     if (gs.mapView === 'world') {
         return {
+            mapLevel: 'world',
+            areaId: null,
+            regionId: null,
             layout: map.worldNodeLayout,
             connections: map.regionConnections,
             current: gs.currentRegion,
@@ -219,14 +255,19 @@ function getMapContext(gs) {
                 const adj = map.getRegionConnections(gs.currentRegion).includes(to);
                 return adj || gs.visitedRegions.includes(to) || to === gs.currentRegion;
             },
+            canNavigate: () => true,
             getIcon: (id) => map.worldRegions[id]?.icon ?? '📍',
-            getLabel: (id) => gs.visitedRegions.includes(id) || id === gs.currentRegion ? id : '???',
+            getLabel: (id) => map.getMapNodeLabel(gs, id, 'world'),
+            getNodeIcon: (id) => map.getMapNodeIcon(gs, id, map.worldRegions[id]?.icon ?? '📍', 'world'),
             onClick: (id) => `window.selectWorldRegion('${id}')`,
         };
     }
     const region = gs.viewRegion;
     const data = map.regionAreas[region];
     return {
+        mapLevel: 'region',
+        areaId: null,
+        regionId: region,
         layout: map.regionNodeLayout[region] ?? {},
         connections: data?.connections ?? {},
         current: gs.currentArea,
@@ -235,11 +276,10 @@ function getMapContext(gs) {
         subtitle: region === gs.currentRegion ? `📍 ${gs.currentArea}` : '먼 곳을 열람 중',
         getDays: (to) => map.getAreaTravelDays(region, gs.currentArea, to),
         canReach: (to) => region === gs.currentRegion && map.canTravelArea(region, gs.currentArea, to),
+        canNavigate: () => true,
         getIcon: (id) => data?.spots[id]?.icon ?? '📍',
-        getLabel: (id) => {
-            const visited = gs.visitedAreas.includes(id);
-            return visited || id === gs.currentArea ? id : '???';
-        },
+        getLabel: (id) => map.getMapNodeLabel(gs, id, 'region', null, region),
+        getNodeIcon: (id) => map.getMapNodeIcon(gs, id, data?.spots[id]?.icon ?? '📍', 'region', null, region),
     };
 }
 
@@ -295,15 +335,17 @@ function buildNodeSvg(ctx, gs) {
 
     for (const [id, pos] of Object.entries(ctx.layout)) {
         const isHere = ctx.current === id;
-        const canGo = ctx.canReach(id) && !isHere;
-        const visited = gs.visitedAreas.includes(id) || gs.visitedRegions.includes(id) || isHere;
+        const adjacent = ctx.canReach(id) && !isHere;
+        const navigable = ctx.canNavigate ? ctx.canNavigate(id) : true;
+        const canGo = adjacent && navigable;
+        const uncharted = map.shouldShowQuestionMark(gs, id, ctx.mapLevel, ctx.areaId, ctx.regionId);
         const label = ctx.getLabel(id);
-        const icon = visited || gs.mapView === 'world' ? ctx.getIcon(id) : '❓';
+        const icon = ctx.getNodeIcon ? ctx.getNodeIcon(id) : ctx.getIcon(id);
 
         let nodeClass = 'map-node';
         if (isHere) nodeClass += ' map-node-current';
         else if (canGo) nodeClass += ' map-node-reachable';
-        else if (!visited && ctx.travelType) nodeClass += ' map-node-fog';
+        else if (uncharted) nodeClass += ' map-node-fog';
 
         let click = '';
         if (isHere) {
@@ -313,16 +355,18 @@ function buildNodeSvg(ctx, gs) {
         } else if (ctx.onClick && ctx.canReach(id)) {
             click = `onclick="${ctx.onClick(id)}"`;
         } else if (ctx.onClick) {
-            click = `onclick="window.mapToast('아직 ${id}(으)로 가는 길을 모른다.')"`;
+            click = `onclick="window.revealMapSpot('${id}')"`;
+        } else {
+            click = `onclick="window.revealMapSpot('${id}')"`;
         }
 
         svg += `
             <g class="${nodeClass}" transform="translate(${pos.x},${pos.y})" ${click}>
-                <circle r="5.5" class="map-node-bg" />
-                ${isHere ? '<circle r="7" class="map-node-ring" />' : ''}
-                <text class="map-node-icon" y="1.8">${icon}</text>
-                <text class="map-node-label" y="11">${label}</text>
-                ${isHere ? '<text class="map-node-player" x="6" y="-5">🥷</text>' : ''}
+                <circle r="6.5" class="map-node-bg" />
+                ${isHere ? '<circle r="8.5" class="map-node-ring" />' : ''}
+                <text class="map-node-icon" y="2">${icon}</text>
+                <text class="map-node-label" y="12.5">${label}</text>
+                ${isHere ? '<text class="map-node-player" x="7" y="-6">🥷</text>' : ''}
             </g>
         `;
     }
@@ -338,32 +382,46 @@ function buildTravelList(ctx, gs) {
     }
 
     const from = ctx.travelType === 'local' ? gs.currentLocation : gs.currentArea;
-    const dests = (ctx.connections[from] ?? [])
-        .map(id => ({
-            id,
-            days: ctx.getDays(id),
-            icon: ctx.getIcon(id),
-            label: ctx.getLabel(id),
-        }))
-        .sort((a, b) => a.days - b.days);
+    const allDests = (ctx.connections[from] ?? []).map(id => ({
+        id,
+        days: ctx.getDays(id),
+        icon: ctx.getNodeIcon ? ctx.getNodeIcon(id) : ctx.getIcon(id),
+        label: ctx.getLabel(id),
+        navigable: ctx.canNavigate ? ctx.canNavigate(id) : true,
+    })).sort((a, b) => a.days - b.days);
 
-    if (!dests.length) {
+    if (!allDests.length) {
         return `<p class="text-xs text-zinc-500 p-2">이동 가능한 곳이 없습니다.</p>`;
     }
 
     return `
         <div class="text-xs text-zinc-500 px-2 py-1 border-b border-zinc-700">이동 가능</div>
-        ${dests.map(d => `
+        ${allDests.map(d => `
             <button onclick="window.requestTravel('${ctx.travelType}','${d.id}')"
                 class="travel-item choice-btn w-full text-left px-3 py-2.5 border-b border-zinc-800 hover:bg-zinc-800/60">
                 <div class="flex items-center gap-2">
                     <span class="text-lg">${d.icon}</span>
-                    <span class="flex-1 text-sm font-medium">${d.label}</span>
+                    <span class="flex-1 text-sm font-medium">${d.label || '❓'}</span>
                     <span class="travel-days-badge">${state.formatDayLabel(d.days)}</span>
                 </div>
             </button>
         `).join('')}
     `;
+}
+
+/** 지도 ❓(미개척) 노드 클릭 */
+export function revealMapSpot(spotId) {
+    const gs = state.gameState;
+    const ctx = getMapContext(gs);
+    if (map.isSpotNameVisible(gs, spotId, ctx.mapLevel, ctx.areaId, ctx.regionId)) {
+        mapToast(spotId);
+        return;
+    }
+    if (map.shouldShowQuestionMark(gs, spotId, ctx.mapLevel, ctx.areaId, ctx.regionId)) {
+        mapToast('미개척 지역이다. 가까운 도부터 발을 들여 보자.');
+        return;
+    }
+    mapToast('아직 정확히 모른다. 그곳에 당도해 탐색·정보 수집을 해 보자.');
 }
 
 export function setMapView(level) {
@@ -455,7 +513,7 @@ export function renderMainPanel() {
             <button onclick="window.gatherIntel()"
                 class="choice-btn p-4 bg-blue-900/40 hover:bg-blue-800/60 border border-blue-600 rounded-xl font-bold">
                 <i class="fas fa-ear-listen mr-2"></i>정보 수집
-                <div class="text-xs font-normal text-blue-300/80 mt-1">성공 ~${intelRate}% · 적 조우 34%</div>
+                <div class="text-xs font-normal text-blue-300/80 mt-1">성공 ~${intelRate}% · ${intel.getIntelStayStatusText(gs)}</div>
             </button>
             <button onclick="window.openRestMenu()"
                 class="choice-btn p-4 bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-600 rounded-xl font-bold">
@@ -469,16 +527,11 @@ export function renderMainPanel() {
 
 function renderRestMenu(gs) {
     const options = rest.getRestOptions(gs);
-    const meta = rest.getRestMenuMeta(gs);
     return `
         <div class="event-card p-6 rounded-2xl">
             <button onclick="window.closeRestMenu()" class="text-sm text-zinc-500 hover:text-amber-400 mb-4 choice-btn">← 돌아가기</button>
             <h3 class="text-xl font-bold text-emerald-400 mb-2"><i class="fas fa-bed mr-2"></i>휴식·숙박</h3>
-            <p class="text-sm text-zinc-500 mb-2">${gs.currentLocation} — 회복 방식을 선택하세요.</p>
-            ${meta.notice ? `
-            <p class="text-sm text-amber-600/90 bg-amber-950/30 border border-amber-800/50 rounded-lg px-3 py-2 mb-4">
-                <i class="fas fa-info-circle mr-1"></i>${meta.notice}
-            </p>` : ''}
+            <p class="text-sm text-zinc-500 mb-4">${gs.currentLocation} — 회복 방식을 선택하세요.</p>
             <div class="space-y-3">
                 ${options.map(o => `
                     <button onclick="window.performRest('${o.id}'${o.sectId ? `,'${o.sectId}'` : ''})"
@@ -619,15 +672,71 @@ function renderPlaceSubView(gs) {
         return renderSectPanel(uiState.sectId);
     }
 
+    if (uiState.view === 'sectJoin') {
+        const sectId = uiState.sectId;
+        const s = sects.getSect(sectId);
+        if (!s) return wrapPlacePanel('입문 권유', '<p class="text-zinc-500">알 수 없는 문파</p>');
+        const aff = sects.getAffinity(sectId);
+        const affLabel = sects.getAffinityLabel(aff);
+        const family = sects.getSectFamilyName(s);
+        const title = memberTitleForSectJoin(s.tier);
+        const pkg = sects.getSectJoinPreview(sectId);
+        const rewardLines = pkg ? `
+            <div class="text-xs text-emerald-300/80 mt-3 space-y-1">
+                <div>📜 문파 무공: ${pkg.artNames.join(', ')}</div>
+                <div>✨ 숙련도 상승 · ${pkg.uniformName} 지급</div>
+            </div>` : '';
+        return `
+            <div class="event-card p-6 rounded-2xl border border-amber-700/50 bg-amber-950/20">
+                <button onclick="window.openSect('${sectId}')" class="text-sm text-zinc-500 hover:text-amber-400 mb-4 choice-btn">← 문파로</button>
+                <div class="flex items-center gap-4 mb-4">
+                    <div class="text-3xl">${s.icon}</div>
+                    <div>
+                        <h3 class="text-xl font-bold text-amber-300">입문 권유</h3>
+                        <p class="text-sm text-zinc-500">${s.name} · 우호 <span class="${affLabel.color} font-bold">${affLabel.label} (${aff})</span></p>
+                    </div>
+                </div>
+                <p class="text-zinc-300 mb-4 leading-relaxed">
+                    ${s.name} 제자가 대련 실력을 인정하며 <span class="text-amber-400">한 번뿐인</span> 입문을 권한다.<br>
+                    <span class="text-amber-200/90">${family}</span>의 <span class="text-zinc-200">${title}</span>가 되겠는가?
+                </p>
+                ${rewardLines}
+                <div class="space-y-3 mt-4">
+                    <button onclick="window.sectAcceptJoin('${sectId}')"
+                        class="choice-btn w-full text-left p-4 rounded-xl border border-emerald-600 bg-emerald-900/30 hover:bg-emerald-800/50">
+                        <b>🏯 입문한다</b>
+                        <div class="text-xs text-emerald-300/70 mt-1">문파 무공·숙련·무복 수령 · 강호첩에 문파명 표시</div>
+                    </button>
+                    <button onclick="window.sectDeclineJoin('${sectId}')"
+                        class="choice-btn w-full text-left p-4 rounded-xl border border-zinc-600 bg-zinc-800/40 hover:bg-zinc-700/50">
+                        <b>사양한다</b>
+                        <div class="text-xs text-zinc-500 mt-1">우호 유지 · 권유는 다시 없음 · 이후 자진 입문 가능(보상 없음)</div>
+                    </button>
+                </div>
+            </div>
+            ${renderLog(gs.eventLog)}
+        `;
+    }
+
     return '';
 }
 
+function memberTitleForSectJoin(tier) {
+    if (tier === '본문') return '내문제자';
+    if (tier === '분파') return '외문제자';
+    return '속가제자';
+}
+
 function encountersItemIcon(itemId) {
-    const icons = { 영초: '🌿', 내공단: '💊', 청강검: '⚔️', 호신갑: '🛡️', 무림첩: '📜' };
-    return icons[itemId] || '📦';
+    return inventory.getItemDef(itemId)?.icon || '📦';
 }
 
 function itemDesc(item) {
+    if (item.item) {
+        const def = inventory.getItemDef(item.item);
+        if (def?.type === 'gear') return `(${inventory.formatGearEffect(def)})`;
+        if (def?.desc) return `(${def.desc})`;
+    }
     const parts = [];
     if (item.hp) parts.push(`체력+${item.hp}`);
     if (item.naegong) parts.push(`내공+${item.naegong}`);
@@ -644,16 +753,22 @@ function renderSectPanel(sectId) {
 
     const aff = sects.getAffinity(sectId);
     const affLabel = sects.getAffinityLabel(aff);
-    const levelOk = gs.level >= s.minSparLevel;
-    const sparHint = levelOk
-        ? `Lv.${s.minSparLevel} 이상 — 대련 가능`
-        : `Lv.${s.minSparLevel} 미만 — ${s.sparFee}냥 필요 또는 거부`;
-    const lodgeNeed = s.tier === '본문' ? 15 : s.tier === '분파' ? 28 : 40;
-    const canLodge = aff >= lodgeNeed;
+    const sparAccess = sects.getSparringAccess(sectId, gs);
+    const sparHint = sects.formatSparringHint(sparAccess, s);
+    const observeAccess = sects.getObserveAccess(sectId, gs);
+    const observeHint = sects.formatObserveHint(observeAccess);
+    const lodgeOpt = rest.getSectLodgingOption(gs);
+    const canLodge = lodgeOpt?.sectId === sectId;
     const dojoInfo = sects.getDojoChallengeInfo(sectId);
+    const dojoCheck = sects.canChallengeDojo(sectId, gs);
+    const dojoHint = dojoCheck.ok
+        ? `Lv.${dojoCheck.minLevel} 이상 — 도전 가능`
+        : `Lv.${dojoCheck.minLevel} 미만 — ${dojoCheck.reason}`;
     const dojoStages = dojoInfo
         ? dojoInfo.stageNames.map((n, i) => `<span class="text-xs text-zinc-500">${i + 1}. ${n}</span>`).join(' · ')
         : '';
+    const joinOffer = sects.getSectJoinOfferStatus(sectId, gs);
+    const canVoluntary = sects.canVoluntaryJoin(sectId, gs);
 
     return `
         <div class="event-card p-6 rounded-2xl">
@@ -667,19 +782,23 @@ function renderSectPanel(sectId) {
             </div>
             <p class="text-zinc-300 mb-6">${s.desc}</p>
             <div class="space-y-3">
-                <button onclick="window.sectSpar('${sectId}')"
-                    class="choice-btn w-full text-left p-4 rounded-xl border border-orange-600 bg-orange-900/30 hover:bg-orange-800/50">
+                <button onclick="window.sectSpar('${sectId}')" ${sparAccess.ok ? '' : 'disabled'}
+                    class="choice-btn w-full text-left p-4 rounded-xl border border-orange-600 bg-orange-900/30 hover:bg-orange-800/50
+                    ${sparAccess.ok ? '' : 'opacity-40 cursor-not-allowed hover:bg-orange-900/30'}">
                     <b>⚔️ 대련</b> — ${sparHint}
-                    <div class="text-xs text-orange-300/70 mt-1">우호 대결 · 승리 시 명성·우호↑ · 패배해도 우호 하락 미미</div>
+                    <div class="text-xs text-orange-300/70 mt-1">우호 대결 · 승리 시 명성·우호↑ · 패배해도 우호 하락 미미 · ${sects.SPAR_CYCLE_DAYS}일 주기 횟수 제한</div>
                 </button>
-                <button onclick="window.sectObserve('${sectId}')"
-                    class="choice-btn w-full text-left p-4 rounded-xl border border-blue-600 bg-blue-900/30 hover:bg-blue-800/50">
-                    <b>🙏 견식</b> — 1일, 우호 상승·경험치 (전투 없음)
+                <button onclick="window.sectObserve('${sectId}')" ${observeAccess.ok ? '' : 'disabled'}
+                    class="choice-btn w-full text-left p-4 rounded-xl border border-blue-600 bg-blue-900/30
+                    ${observeAccess.ok ? 'hover:bg-blue-800/50' : 'opacity-40 cursor-not-allowed pointer-events-none hover:bg-blue-900/30'}">
+                    <b>🙏 견식</b> — ${observeHint}
+                    <div class="text-xs text-blue-300/70 mt-1">1일 소모 · 우호 상승·경험치 · ${sects.OBSERVE_CYCLE_DAYS}일 주기 횟수 제한</div>
                 </button>
-                <button onclick="window.sectChallenge('${sectId}')"
-                    class="choice-btn w-full text-left p-4 rounded-xl border border-red-600 bg-red-900/30 hover:bg-red-800/50">
-                    <b>🏯 도장깨기</b> — ${dojoInfo?.stageCount ?? '?'}단계 (${dojoInfo?.note ?? ''})
-                    <div class="text-xs text-red-300/70 mt-1">문파 모욕 · 완료·패배 시 명성·우호↓ · 최종 ${s.guardian.name}</div>
+                <button onclick="window.sectChallenge('${sectId}')" ${dojoCheck.ok ? '' : 'disabled'}
+                    class="choice-btn w-full text-left p-4 rounded-xl border border-red-600 bg-red-900/30 hover:bg-red-800/50
+                    ${dojoCheck.ok ? '' : 'opacity-40 cursor-not-allowed hover:bg-red-900/30'}">
+                    <b>🏯 도장깨기</b> — ${dojoHint}
+                    <div class="text-xs text-red-300/70 mt-1">3단계 (${dojoInfo?.note ?? '직계제자 → 장로 → 장문인'}) · 문파 모욕 · 완료·패배 시 명성·우호↓</div>
                     ${dojoStages ? `<div class="text-xs text-zinc-600 mt-1 leading-relaxed">${dojoStages}</div>` : ''}
                 </button>
                 ${s.canTrain ? `
@@ -690,12 +809,24 @@ function renderSectPanel(sectId) {
                 ${canLodge ? `
                 <button onclick="window.performRest('sect','${sectId}')"
                     class="choice-btn w-full text-left p-4 rounded-xl border border-amber-600 bg-amber-900/30 hover:bg-amber-800/50">
-                    <b>🏠 초대 숙박</b> — 전폭 회복·경험치 (우호 ${aff})
+                    <b>🏠 초대 숙박</b> — 전폭 회복·경험치 (우호 ${aff}, 이용 시 -${rest.SECT_LODGE_AFFINITY_COST})
                     <div class="text-xs text-amber-300/70 mt-1">거대 문파 우대 · 회복률 높음</div>
-                </button>` : `
-                <p class="text-xs text-zinc-600 px-2">숙박 우대: 우호 ${lodgeNeed} 이상 (${s.tier === '본문' ? '본문' : s.tier})</p>`}
+                </button>` : ''}
+                ${joinOffer === 'pending' ? `
+                <button onclick="window.sectReopenJoin('${sectId}')"
+                    class="choice-btn w-full text-left p-4 rounded-xl border border-amber-600 bg-amber-900/30 hover:bg-amber-800/50">
+                    <b>📜 입문 권유 확인</b>
+                    <div class="text-xs text-amber-300/70 mt-1">대련 승리로 받은 1회 한정 권유 · 무공·숙련·무복 수령</div>
+                </button>` : ''}
+                ${canVoluntary ? `
+                <button onclick="window.sectVoluntaryJoin('${sectId}')"
+                    class="choice-btn w-full text-left p-4 rounded-xl border border-emerald-700 bg-emerald-950/30 hover:bg-emerald-900/40">
+                    <b>🏯 자진 입문</b> — 우호 ${aff} (필요 ${sects.SECT_JOIN_AFFINITY}+)
+                    <div class="text-xs text-emerald-300/70 mt-1">문파 소속만 획득 · 무공 전수·숙련 보상 없음</div>
+                </button>` : ''}
             </div>
         </div>
+        ${renderLog(gs.eventLog)}
     `;
 }
 
@@ -723,16 +854,21 @@ function renderEvent(event) {
             </div>
             <p class="text-zinc-300 leading-relaxed mb-6">${event.desc}</p>
             <div class="space-y-3">
-                ${event.choices.map((c, i) => `
-                    <button onclick="window.makeChoice(${i})"
-                        class="choice-btn w-full text-left p-4 rounded-xl border transition-all
-                            ${c.type === 'good' ? 'border-blue-600 bg-blue-900/30 hover:bg-blue-800/50' :
-                              c.type === 'evil' ? 'border-red-600 bg-red-900/30 hover:bg-red-800/50' :
-                              c.type === 'battle' ? 'border-orange-600 bg-orange-900/30 hover:bg-orange-800/50' :
-                              'border-zinc-600 bg-zinc-800/50 hover:bg-zinc-700/50'}">
-                        ${c.text}
-                    </button>
-                `).join('')}
+                ${event.choices.map((c, i) => {
+                    const gs = state.gameState;
+                    const disabled = typeof c.disabled === 'function' ? c.disabled(gs) : !!c.disabled;
+                    const reason = disabled && c.disabledReason ? ` <span class="text-zinc-500 text-sm">— ${c.disabledReason}</span>` : '';
+                    const tone = c.type === 'good' ? 'border-blue-600 bg-blue-900/30 hover:bg-blue-800/50' :
+                        c.type === 'evil' ? 'border-red-600 bg-red-900/30 hover:bg-red-800/50' :
+                        c.type === 'battle' ? 'border-orange-600 bg-orange-900/30 hover:bg-orange-800/50' :
+                        'border-zinc-600 bg-zinc-800/50 hover:bg-zinc-700/50';
+                    return `
+                    <button onclick="window.makeChoice(${i})" ${disabled ? 'disabled' : ''}
+                        class="choice-btn w-full text-left p-4 rounded-xl border transition-all ${tone}
+                            ${disabled ? 'opacity-40 cursor-not-allowed hover:bg-inherit' : ''}">
+                        ${c.text}${reason}
+                    </button>`;
+                }).join('')}
             </div>
         </div>
     `;
@@ -821,14 +957,8 @@ export function renderInfoContent() {
 }
 
 function renderHeroAvatar(hero, size = 'md') {
-    const cls = size === 'lg' ? 'sd-hero-masked sd-hero-lg' : 'sd-hero-masked';
-    return `
-        <div class="${cls}" title="${hero.subtitle}">
-            <div class="hero-body"></div>
-            <div class="hero-mask"></div>
-            <div class="hero-hat"></div>
-        </div>
-    `;
+    const cls = size === 'lg' ? 'sd-hero-sprite sd-hero-sprite-lg' : 'sd-hero-sprite';
+    return `<img class="${cls}" src="assets/hero-idle.png" alt="${hero.subtitle}" title="${hero.subtitle}" draggable="false" decoding="async">`;
 }
 
 function renderCharacterPanel() {
@@ -840,8 +970,11 @@ function renderCharacterPanel() {
     const ngUnlocked = martial.isNaegongUnlocked(gs);
     const expNeed = gs.level * 30;
     const expPct = Math.floor((gs.exp / expNeed) * 100);
+    const ngLv = gs.naegongLevel || 1;
+    const ngExpNeed = ngLv * 30;
+    const ngExpPct = ngUnlocked ? Math.floor(((gs.naegongExp || 0) / ngExpNeed) * 100) : 0;
     const ngLabel = ngUnlocked
-        ? `${gs.naegong}/${gs.maxNaegong}`
+        ? `Lv.${ngLv} · ${gs.naegong}/${gs.maxNaegong}`
         : `내공 미타동 (Lv.${realm.NAEGONG_UNLOCK_LEVEL})`;
 
     return `
@@ -866,6 +999,7 @@ function renderCharacterPanel() {
                         ${heroDisp.sectStanding.rank === 'leader'
                             ? '<span class="text-amber-400 ml-1">문파장</span>'
                             : `<span class="text-zinc-400 ml-1">${heroDisp.sectStanding.memberTitle}</span>`}
+                        ${heroDisp.uniform ? `<span class="text-cyan-400/80 ml-1">· ${heroDisp.uniform.icon} ${heroDisp.uniform.name}</span>` : ''}
                     </div>` : '<div class="text-xs text-zinc-600">문파 미소속</div>'}
                     <span class="inline-block text-xs px-2 py-0.5 rounded-md ${heroDisp.realm.badge} ${heroDisp.realm.color} font-bold">【${heroDisp.realmName}】</span>
                 </div>
@@ -884,12 +1018,21 @@ function renderCharacterPanel() {
                         <span>${realmProg.need}레벨 남음</span>
                     </div>` : '<div class="text-xs text-rose-300 mt-1 text-right">절정의 경지</div>'}
                 </div>
+                ${ngUnlocked ? `
+                <div>
+                    <div class="flex justify-between text-sm mb-1">
+                        <span class="text-blue-300">내공 숙련 Lv.${ngLv}</span>
+                        <span class="text-zinc-500">${gs.naegongExp || 0}/${ngExpNeed} EXP</span>
+                    </div>
+                    <div class="hp-bar"><div class="hp-fill ng-fill" style="width:${ngExpPct}%"></div></div>
+                    <p class="text-xs text-zinc-600 mt-1">전투 승리 시 상대가 강할수록 내공 경험치 증가</p>
+                </div>` : ''}
                 <div class="grid grid-cols-3 gap-3 text-center text-sm">
-                    <div class="bg-zinc-800/60 rounded-xl p-3"><div class="text-blue-400 font-bold text-lg">${gs.chivalry}</div><div class="text-zinc-500">협의</div></div>
+                    <div class="bg-zinc-800/60 rounded-xl p-3"><div class="text-blue-400 font-bold text-lg">${gs.hyeophaeng}</div><div class="text-zinc-500">협행</div><div class="text-zinc-600 text-xs">${gs.hyeophaeng % 100}/100</div></div>
                     <div class="bg-zinc-800/60 rounded-xl p-3"><div class="text-yellow-400 font-bold text-lg">${gs.fame}</div><div class="text-zinc-500 text-xs">명성</div></div>
-                    <div class="bg-zinc-800/60 rounded-xl p-3"><div class="text-red-400 font-bold text-lg">${gs.notoriety}</div><div class="text-zinc-500 text-xs">악명</div></div>
+                    <div class="bg-zinc-800/60 rounded-xl p-3"><div class="text-red-400 font-bold text-lg">${gs.notoriety}</div><div class="text-zinc-500 text-xs">악명</div><div class="text-zinc-600 text-xs">${gs.aekhaeng % 100}/100</div></div>
                 </div>
-                <p class="text-xs text-zinc-600 -mt-2">협의 상승 → 명성 · 협의 하락 → 악명 (양립 불가)</p>
+                <p class="text-xs text-zinc-600 -mt-2">협행 100 = 명성 1 · 악행 100 = 악명 1 (도덕 선택 시 협행↓ → 악행↑)</p>
                 <div class="grid grid-cols-2 gap-2 text-sm">
                     ${[
                         ['체력', `${gs.hp}/${gs.maxHp}`, 'text-rose-400'],
@@ -941,24 +1084,58 @@ function renderSectAffinities(gs) {
 }
 
 function renderInventory(gs) {
-    const items = gs.inventory || [];
-    if (!items.length) {
-        return '<p class="text-xs text-zinc-500 mt-2">소지품 없음</p>';
-    }
+    inventory.initInventory(gs);
+    const bag = gs.inventory || [];
+    const slotHtml = Object.entries(inventory.GEAR_SLOTS).map(([slot, label]) => {
+        const id = gs.equipped?.[slot];
+        const item = id ? inventory.getItemDef(id) : null;
+        const grade = item?.grade ? inventory.formatGradeBadge(item.grade) : '';
+        const effect = item ? inventory.formatGearEffect(item) : '';
+        return `
+            <div class="flex items-center justify-between bg-zinc-800/60 rounded-lg px-3 py-2 text-sm border border-zinc-700/80">
+                <div class="min-w-0">
+                    <span class="text-zinc-500 text-xs">${label}</span>
+                    ${item ? `
+                    <div class="font-medium text-amber-200/90">${item.icon} ${item.name} ${grade}</div>
+                    <div class="text-xs text-zinc-500">${effect}</div>`
+                    : '<div class="text-zinc-600 text-xs">미장착</div>'}
+                </div>
+                ${item ? `
+                <button onclick="window.unequipItem('${slot}')"
+                    class="px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded-lg choice-btn shrink-0">해제</button>` : ''}
+            </div>`;
+    }).join('');
+
+    const bagHtml = bag.length
+        ? bag.map(item => {
+            const grade = item.grade ? inventory.formatGradeBadge(item.grade) : '';
+            const effect = item.type === 'gear' ? inventory.formatGearEffect(item) : item.desc;
+            const btn = item.type === 'consumable'
+                ? `<button onclick="window.useItem('${item.id}')"
+                    class="px-2 py-1 text-xs bg-amber-900/60 hover:bg-amber-800 rounded-lg choice-btn shrink-0">사용</button>`
+                : item.slot === 'weapon'
+                    ? `<button onclick="window.equipItem('${item.id}')"
+                        class="px-2 py-1 text-xs bg-orange-900/60 hover:bg-orange-800 rounded-lg choice-btn shrink-0">장착</button>`
+                    : `<button onclick="window.equipItem('${item.id}')"
+                        class="px-2 py-1 text-xs bg-emerald-900/60 hover:bg-emerald-800 rounded-lg choice-btn shrink-0">착용</button>`;
+            return `
+                <div class="flex items-center justify-between bg-zinc-800/50 rounded-lg px-3 py-2 text-sm gap-2">
+                    <div class="min-w-0">
+                        <span class="font-medium">${item.icon} ${item.name}</span> ${grade}
+                        <div class="text-xs text-zinc-500">${effect}</div>
+                    </div>
+                    ${btn}
+                </div>`;
+        }).join('')
+        : '<p class="text-xs text-zinc-600">가방이 비었다</p>';
+
     return `
         <div class="mt-3">
-            <h4 class="text-sm text-zinc-500 mb-2"><i class="fas fa-box-open mr-1"></i>소지품</h4>
-            <div class="space-y-2">
-                ${items.map(item => `
-                    <div class="flex items-center justify-between bg-zinc-800/50 rounded-lg px-3 py-2 text-sm">
-                        <span>${item.icon} <span class="font-medium">${item.name}</span>
-                            <span class="text-zinc-500 text-xs ml-1">${item.desc}</span></span>
-                        ${item.type === 'consumable' ? `
-                        <button onclick="window.useItem('${item.id}')"
-                            class="px-2 py-1 text-xs bg-amber-900/60 hover:bg-amber-800 rounded-lg choice-btn">사용</button>` : ''}
-                    </div>
-                `).join('')}
-            </div>
+            <h4 class="text-sm text-zinc-500 mb-2"><i class="fas fa-box-open mr-1"></i>인벤토리</h4>
+            <p class="text-[0.65rem] text-zinc-600 mb-2">무기가 주력 장비 · 방갑은 회피 중심, 기연급 방어구만 방어 보정(고급일수록 체감 제한)</p>
+            <div class="space-y-2 mb-3">${slotHtml}</div>
+            <div class="text-xs text-zinc-500 mb-1">가방</div>
+            <div class="space-y-2">${bagHtml}</div>
         </div>
     `;
 }
@@ -1003,7 +1180,7 @@ function renderMurimPanel() {
         <div class="mb-4 p-4 bg-amber-900/20 border border-amber-800/50 rounded-xl">
             <h4 class="text-amber-400 font-bold mb-1">강호 정세</h4>
             <p class="text-sm text-zinc-400">촉중 사천에서 여정을 시작했다. 정보 수집으로 얻은 소식이 아래에 쌓인다.</p>
-            <p class="text-xs text-zinc-600 mt-1">정보 수집 성공률 <span class="text-blue-400">${intelRate}%</span> · 수집 ${(gs.intelJournal || []).length}건일수록 감소</p>
+            <p class="text-xs text-zinc-600 mt-1">정보 수집 <span class="text-blue-400">${intelRate}%</span> · <span class="text-emerald-400">${intel.getIntelStayStatusText(gs)}</span> · 획득 시 급감</p>
         </div>
         ${intel.renderIntelJournalPanel(gs)}
         <h4 class="text-sm text-zinc-500 mb-2">천하 도(道)</h4>

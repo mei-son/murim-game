@@ -10,9 +10,9 @@ export const SCALE = {
 
 export const SHOPS = {
     tavern:    { id: 'tavern',    name: '주막',   icon: '🍶', desc: '소식과 술, 식사' },
-    pawn:      { id: 'pawn',      name: '당포',   icon: '💰', desc: '장비·잡화 매매' },
+    pawn:      { id: 'pawn',      name: '당포',   icon: '💰', desc: '회피복·잡화 매매' },
     herb:      { id: 'herb',      name: '약방',   icon: '🌿', desc: '약재·단약' },
-    weapon:    { id: 'weapon',    name: '무기점', icon: '⚔️', desc: '병기·갑옷' },
+    weapon:    { id: 'weapon',    name: '무기점', icon: '⚔️', desc: '검·도 등 병기' },
     book:      { id: 'book',      name: '서적상', icon: '📚', desc: '무공서·강호첩' },
     general:   { id: 'general',   name: '잡화점', icon: '🏪', desc: '일용잡화' },
 };
@@ -24,7 +24,8 @@ export const SHOP_STOCK = {
         { id: 'rumor', name: '소문 듣기', icon: '👂', gold: 5, intel: true },
     ],
     pawn: [
-        { id: '호신갑', item: '호신갑', gold: 45 },
+        { id: '경갑', item: '경갑', gold: 28 },
+        { id: '비천의', item: '비천의', gold: 55 },
         { id: '영초', item: '영초', gold: 18 },
     ],
     herb: [
@@ -33,8 +34,8 @@ export const SHOP_STOCK = {
         { id: 'hp_potion', name: '회천단', icon: '💊', gold: 25, hp: 50 },
     ],
     weapon: [
+        { id: '철검', item: '철검', gold: 40 },
         { id: '청강검', item: '청강검', gold: 80 },
-        { id: 'iron_sword', name: '철검', icon: '🗡️', gold: 40, atk: 2 },
     ],
     book: [
         { id: '무림첩', item: '무림첩', gold: 30 },
@@ -75,13 +76,13 @@ export const PLACE_PROFILES = {
         sects: ['cheongseong_branch'],
     },
 
-    '峨嵋금정': {
+    '아미금정': {
         scale: 'remote',
         shops: [],
         sects: ['emei_main'],
     },
-    '금정대전': { scale: 'remote', parent: '峨嵋금정', shops: [], sects: ['emei_branch'] },
-    '산사':     { scale: 'remote', parent: '峨嵋금정', shops: [], sects: ['emei_lay'] },
+    '금정대전': { scale: 'remote', parent: '아미금정', shops: [], sects: ['emei_branch'] },
+    '산사':     { scale: 'remote', parent: '아미금정', shops: [], sects: ['emei_lay'] },
 
     '검각관': { scale: 'pass', shops: [], sects: ['wanderer_camp'] },
     '관문':   { scale: 'pass', parent: '검각관', shops: [], sects: [] },

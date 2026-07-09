@@ -76,6 +76,8 @@ export function getPublicLabel(gs = state.gameState) {
     }
 
     if (standing?.rank === 'disciple') {
+        const uniform = gs.hero?.uniform;
+        const uniformNote = uniform?.name ? ` · ${uniform.name}` : '';
         return {
             role: hasAlias ? alias : '없음',
             sect: standing.sectFamily,
@@ -86,7 +88,8 @@ export function getPublicLabel(gs = state.gameState) {
             text: hasAlias ? alias : '없음',
             withDisposition: hasAlias ? `${alias} · ${disp.label}` : `별호 없음 · ${disp.label}`,
             publicName: hasAlias ? alias : '무명객',
-            subtitle: `${standing.sectFamily} ${standing.memberTitle} · 성향 ${disp.label}`,
+            subtitle: `${standing.sectFamily} ${standing.memberTitle}${uniformNote} · 성향 ${disp.label}`,
+            uniform,
         };
     }
 
@@ -118,6 +121,7 @@ export function getHeroDisplay(gs = state.gameState) {
         publicNameFull: pub.withDisposition,
         disposition: pub.disposition,
         sectStanding: gs.sectStanding || null,
+        uniform: h.uniform || null,
         realm: r,
         realmName: r.name,
         subtitle: pub.subtitle,

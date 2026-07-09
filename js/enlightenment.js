@@ -130,6 +130,28 @@ export function tryEnlightenment(context = 'normal', fled = false) {
     };
 }
 
+/** 네임드 사사 등 — 확정 깨달음 */
+export function forceEnlightenment(context = 'spar') {
+    const gs = state.gameState;
+    initEnlightenment(gs);
+    const combatType = mapCombatType(context);
+    const r = realm.getRealm(gs.level);
+    const martialExp = Math.floor((MARTIAL_EXP_BY_REALM[r.rank] || 45) * 1.6);
+    const levelUps = martial.gainMartialEnlightenmentExp(martialExp);
+    gs.enlightenment.total = (gs.enlightenment.total || 0) + 1;
+    const artNames = levelUps.map(u => `${u.name} Lv.${u.level}`).join(', ');
+    const msg = `✨ 깨달음! — ${artNames || '무공 숙련이 깊어졌다'}`;
+    state.addLog(msg);
+    return {
+        source: 'forced',
+        combatType,
+        martialExp,
+        levelUps,
+        realm: r.name,
+        message: msg,
+    };
+}
+
 export function getPityStatus(gs = state.gameState) {
     initEnlightenment(gs);
     const r = realm.getRealm(gs.level);

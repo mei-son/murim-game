@@ -22,22 +22,184 @@
             flex-shrink: 0;
         }
         .choice-btn { transition: transform 0.15s, background 0.15s; }
-        .choice-btn:hover { transform: translateY(-2px); }
+        .choice-btn:hover:not(:disabled) { transform: translateY(-2px); }
+        .choice-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+            transform: none;
+        }
         .hp-bar { height: 8px; border-radius: 4px; background: #3f3f46; overflow: hidden; }
         .hp-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
         .hp-fill-player { background: linear-gradient(90deg, #dc2626, #ef4444); }
         .hp-fill-enemy { background: linear-gradient(90deg, #7c2d12, #ea580c); }
         .ng-fill { background: linear-gradient(90deg, #1d4ed8, #3b82f6); }
+        .stamina-fill { background: linear-gradient(90deg, #4d7c0f, #84cc16); }
+
+        /* Battle Log */
+        #battle-log {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            gap: 0.15rem;
+            min-height: 8.5rem;
+            max-height: 11rem;
+            overflow-y: auto;
+            overflow-x: hidden;
+            scroll-behavior: smooth;
+        }
+        .battle-log-row {
+            display: flex;
+            width: 100%;
+        }
+        .battle-log-row--player { justify-content: flex-end; }
+        .battle-log-row--enemy { justify-content: flex-start; }
+        .battle-log-row--system { justify-content: center; }
+        .battle-log-line {
+            font-size: 0.8125rem;
+            line-height: 1.45;
+            padding: 0.35rem 0.55rem;
+            border-radius: 0.55rem;
+            color: #a1a1aa;
+            margin: 0;
+            max-width: 88%;
+        }
+        .battle-log-row--player .battle-log-line {
+            text-align: right;
+            border-radius: 0.55rem 0.2rem 0.55rem 0.55rem;
+        }
+        .battle-log-row--enemy .battle-log-line {
+            text-align: left;
+            border-radius: 0.2rem 0.55rem 0.55rem 0.55rem;
+        }
+        .battle-log-row--system .battle-log-line {
+            text-align: center;
+            max-width: 100%;
+            background: transparent;
+            border: none;
+            padding: 0.15rem 0.35rem;
+        }
+        .battle-log-who {
+            display: block;
+            font-size: 0.62rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            margin-bottom: 0.12rem;
+            opacity: 0.82;
+        }
+        .battle-log-row--player .battle-log-who { color: #fca5a5; }
+        .battle-log-row--enemy .battle-log-who { color: #fdba74; }
+        .battle-log-crit {
+            color: #fde047;
+            font-weight: 800;
+            text-shadow: 0 0 8px rgba(250, 204, 21, 0.35);
+        }
+        .battle-log-crit .battle-dmg { color: #fef08a; font-size: 1.05em; }
+        .battle-log-player-atk {
+            color: #fecaca;
+            background: rgba(127, 29, 29, 0.32);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            border-right: 3px solid #ef4444;
+            font-weight: 600;
+        }
+        .battle-log-enemy-atk {
+            color: #fed7aa;
+            background: rgba(124, 45, 18, 0.28);
+            border: 1px solid rgba(249, 115, 22, 0.35);
+            border-left: 3px solid #f97316;
+            font-weight: 600;
+        }
+        .battle-log-evade {
+            color: #a5f3fc;
+            background: rgba(14, 116, 144, 0.22);
+            font-weight: 700;
+        }
+        .battle-log-row--player .battle-log-evade {
+            border: 1px solid rgba(34, 211, 238, 0.35);
+            border-right: 3px solid #22d3ee;
+        }
+        .battle-log-row--enemy .battle-log-evade {
+            border: 1px solid rgba(34, 211, 238, 0.28);
+            border-left: 3px solid #22d3ee;
+            color: #99f6e4;
+            background: rgba(19, 78, 74, 0.28);
+        }
+        .battle-log-defend {
+            color: #bfdbfe;
+            background: rgba(30, 58, 138, 0.22);
+        }
+        .battle-log-row--player .battle-log-defend {
+            border: 1px solid rgba(59, 130, 246, 0.35);
+            border-right: 3px solid #3b82f6;
+        }
+        .battle-log-row--enemy .battle-log-defend {
+            border: 1px solid rgba(59, 130, 246, 0.28);
+            border-left: 3px solid #3b82f6;
+        }
+        .battle-log-victory {
+            color: #fde68a;
+            background: rgba(120, 53, 15, 0.35);
+            border: 1px solid rgba(251, 191, 36, 0.4);
+            font-weight: 700;
+        }
+        .battle-log-defeat {
+            color: #fca5a5;
+            background: rgba(69, 10, 10, 0.4);
+            border: 1px solid rgba(220, 38, 38, 0.4);
+            font-weight: 700;
+        }
+        .battle-log-flee {
+            color: #d4d4d8;
+            font-style: italic;
+            background: rgba(63, 63, 70, 0.35);
+            border: 1px solid rgba(161, 161, 170, 0.25);
+            border-right: 3px solid #a1a1aa;
+        }
+        .battle-log-system { color: #a8a29e; font-size: 0.75rem; }
+        .battle-action { color: #fef08a; font-weight: 800; }
+        .battle-dmg {
+            color: #fff;
+            font-weight: 800;
+            font-size: 0.95em;
+            padding: 0 0.2rem;
+            background: rgba(0, 0, 0, 0.35);
+            border-radius: 0.25rem;
+        }
+        .battle-log-player-atk .battle-dmg { color: #fecaca; }
+        .battle-log-enemy-atk .battle-dmg { color: #ffedd5; }
+        .battle-log-evade .battle-dmg { color: #cffafe; }
+        .battle-round-divider {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin: 0.35rem 0 0.2rem;
+            font-size: 0.68rem;
+            font-weight: 800;
+            color: #a8a29e;
+            letter-spacing: 0.08em;
+        }
+        .battle-round-divider::before,
+        .battle-round-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #57534e, transparent);
+        }
+        .battle-round-divider span {
+            color: #fbbf24;
+            padding: 0 0.25rem;
+            white-space: nowrap;
+        }
 
         /* Node Map */
         #node-map-wrap {
             background: radial-gradient(ellipse at center, #1a2e1a 0%, #1c1917 70%);
             border-radius: 12px;
             border: 2px solid #44403c;
-            min-height: 280px;
+            min-height: 360px;
             position: relative;
         }
-        .node-svg { width: 100%; height: 280px; display: block; }
+        .node-svg { width: 100%; height: 360px; display: block; }
         .map-edge { stroke: #52525b; stroke-width: 0.6; stroke-dasharray: 2 1; }
         .map-edge-active { stroke: #86efac; stroke-width: 0.9; stroke-dasharray: none; opacity: 0.9; }
         .map-edge-days {
@@ -51,21 +213,24 @@
         .map-node-current .map-node-bg { fill: #92400e; stroke: #fbbf24; stroke-width: 0.7; }
         .map-node-reachable .map-node-bg { fill: #1e3a2f; stroke: #4ade80; stroke-width: 0.5; }
         .map-node-fog .map-node-bg { fill: #27272a; stroke: #3f3f46; opacity: 0.6; }
+        .map-node-unknown { cursor: pointer; }
+        .map-node-unknown:hover .map-node-bg { fill: #3f3f46; stroke: #a1a1aa; }
+        .map-node-unknown .map-node-label { fill: #a1a1aa; }
         .map-node-ring { fill: none; stroke: #fbbf24; stroke-width: 0.4; opacity: 0.6;
             animation: pulse-ring 2s infinite; }
         @keyframes pulse-ring {
             0%, 100% { r: 7; opacity: 0.6; }
             50% { r: 8; opacity: 0.3; }
         }
-        .map-node-icon { font-size: 5px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
-        .map-node-label { font-size: 3.2px; fill: #e4e4e7; text-anchor: middle; font-weight: 700; pointer-events: none; }
+        .map-node-icon { font-size: 6px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+        .map-node-label { font-size: 3.6px; fill: #e4e4e7; text-anchor: middle; font-weight: 700; pointer-events: none; }
         .map-node-player { font-size: 4px; pointer-events: none; }
         #travel-list {
             background: #1c1917;
             border-radius: 10px;
             border: 1px solid #57534e;
             overflow: hidden;
-            max-height: 280px;
+            max-height: 360px;
             overflow-y: auto;
         }
         .travel-days-badge {
@@ -150,8 +315,8 @@
             position: absolute;
             top: calc(100% + 8px);
             left: 0;
-            min-width: 260px;
-            max-width: 320px;
+            min-width: 280px;
+            max-width: 340px;
             background: #1c1917;
             border: 2px solid #854d0e;
             border-radius: 1rem;
@@ -248,6 +413,59 @@
         }
         #enlightenment-toast.hidden { display: none; }
         #enlightenment-toast.opacity-0 { opacity: 0; }
+
+        #debug-panel {
+            position: fixed;
+            right: 0.5rem;
+            bottom: 0.5rem;
+            z-index: 80;
+            width: min(28rem, calc(100vw - 1rem));
+            max-height: 14rem;
+            background: rgb(9 9 11 / 0.94);
+            border: 1px solid #52525b;
+            border-radius: 0.75rem;
+            font-size: 0.68rem;
+            line-height: 1.35;
+            box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+            pointer-events: auto;
+        }
+        #debug-panel.hidden { display: none; }
+        #debug-panel .debug-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.35rem 0.5rem;
+            border-bottom: 1px solid #3f3f46;
+            color: #a78bfa;
+            font-weight: 700;
+        }
+        #debug-flags {
+            padding: 0.25rem 0.5rem;
+            color: #22d3ee;
+            border-bottom: 1px solid #27272a;
+            word-break: break-all;
+        }
+        #debug-lines {
+            padding: 0.35rem 0.5rem;
+            max-height: 8.5rem;
+            overflow-y: auto;
+            color: #d4d4d8;
+        }
+        .debug-line { margin-bottom: 0.15rem; }
+        .debug-cat--travel { color: #22d3ee; }
+        .debug-cat--battle { color: #f87171; }
+        .debug-cat--event { color: #fbbf24; }
+        .debug-cat--error { color: #ef4444; }
+        .debug-cat--debug { color: #a78bfa; }
+        .debug-btn {
+            font-size: 0.62rem;
+            padding: 0.1rem 0.35rem;
+            border-radius: 0.25rem;
+            background: #3f3f46;
+            color: #e4e4e7;
+        }
+        .debug-btn:hover { background: #52525b; }
         .enlightenment-toast-inner {
             background: linear-gradient(135deg, #422006, #1c1917);
             border: 2px solid #fbbf24;
@@ -258,7 +476,25 @@
             min-width: 240px;
         }
 
-        /* 복면 하급무사 아바타 */
+        /* 협객 SD — idle 모션 */
+        .sd-hero-sprite {
+            width: 5rem;
+            height: 6.5rem;
+            object-fit: contain;
+            object-position: bottom center;
+            filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.4));
+            flex-shrink: 0;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        .sd-hero-sprite.sd-hero-sprite-lg {
+            width: 6.25rem;
+            height: 8.1rem;
+            margin: 0 auto;
+        }
+
+        /* 복면 하급무사 아바타 (구형 — 폴백) */
         .sd-hero-masked {
             width: 80px; height: 80px;
             position: relative;
@@ -297,6 +533,223 @@
             position: absolute; top: 35%; left: 18%; right: 18%; height: 30%;
             background: #292524;
             border-radius: 2px;
+        }
+
+        /* 전투 전신 SD — 스프라이트(상단) · 스탯(하단) 분리, 3열 그리드 정렬 */
+        .battle-arena {
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+            padding: 0.5rem 0 0.25rem;
+            background: radial-gradient(ellipse 80% 55% at 50% 35%, rgba(120, 53, 15, 0.15), transparent);
+        }
+        .battle-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            column-gap: 1.5rem;
+            width: 100%;
+            max-width: 26rem;
+            margin: 0 auto;
+        }
+        .battle-grid--stage {
+            min-height: 7.5rem;
+            align-items: end;
+        }
+        .battle-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            min-width: 0;
+        }
+        .battle-cell--vs {
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #d97706;
+            padding-bottom: 1.75rem;
+            text-shadow: 0 0 12px rgba(217, 119, 6, 0.4);
+        }
+        .battle-grid--hud .battle-cell--vs {
+            padding-bottom: 0;
+            visibility: hidden;
+            font-size: 1.75rem;
+            line-height: 1.75rem;
+        }
+        .battle-hud-sub--spacer {
+            visibility: hidden;
+        }
+        .battle-hud-name {
+            font-weight: 700;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+            min-height: 1.25rem;
+            text-align: center;
+        }
+        .battle-hud-sub {
+            font-size: 0.75rem;
+            color: #71717a;
+            line-height: 1rem;
+            min-height: 1rem;
+            margin-top: 0.125rem;
+            text-align: center;
+        }
+        .battle-bars {
+            width: 8rem;
+            margin-top: 0.5rem;
+        }
+        .battle-bar-row {
+            margin-top: 0.25rem;
+        }
+        .battle-bar-row:first-child {
+            margin-top: 0;
+        }
+        .battle-bar-label {
+            font-size: 0.75rem;
+            line-height: 1rem;
+            min-height: 1rem;
+            margin-top: 0.125rem;
+            text-align: center;
+        }
+        .battle-bar-row--placeholder .hp-bar {
+            opacity: 0.2;
+        }
+        .battle-bar-row--placeholder .battle-bar-label {
+            color: #52525b;
+        }
+        .sd-fighter {
+            position: relative;
+            width: 5.5rem;
+            height: 7.25rem;
+            margin-bottom: 0.35rem;
+            flex-shrink: 0;
+        }
+        .sd-shadow {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 3.4rem;
+            height: 0.5rem;
+            margin-left: -1.7rem;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 50%;
+            filter: blur(3px);
+            z-index: 0;
+        }
+        .sd-pose {
+            position: absolute;
+            inset: 0;
+            transform-origin: bottom center;
+            z-index: 1;
+        }
+        .sd-sprite {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: bottom center;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-drag: none;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45));
+        }
+        .sd-fighter--player .sd-sprite {
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45)) brightness(1.02);
+        }
+        .sd-fighter--enemy .sd-sprite {
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.45));
+        }
+
+        /* SD 전투 애니메이션 */
+        .sd-fighter.sd-anim-attack .sd-pose {
+            animation: sd-atk-player 0.48s ease;
+        }
+        .sd-fighter--enemy.sd-anim-attack .sd-pose {
+            animation: sd-atk-enemy 0.48s ease;
+        }
+        @keyframes sd-atk-player {
+            0%, 100% { transform: translateX(0) scale(1); }
+            45% { transform: translateX(0.35rem) scale(1.04); }
+        }
+        @keyframes sd-atk-enemy {
+            0%, 100% { transform: translateX(0) scale(1); }
+            45% { transform: translateX(-0.35rem) scale(1.04); }
+        }
+        .sd-fighter.sd-anim-defend .sd-pose {
+            animation: sd-defend-pose 0.52s ease;
+        }
+        @keyframes sd-defend-pose {
+            0%, 100% { transform: scale(1); }
+            45% { transform: scale(0.92) translateY(0.12rem); }
+        }
+        .sd-fighter.sd-anim-evade .sd-pose {
+            animation: sd-evade-pose 0.58s ease;
+        }
+        @keyframes sd-evade-pose {
+            0%, 100% { transform: translate(0, 0); opacity: 1; }
+            25% { transform: translate(0.8rem, -0.6rem) scale(0.92); opacity: 0.35; }
+            50% { transform: translate(-0.5rem, 0.2rem) scale(1.02); opacity: 0.75; }
+            75% { transform: translate(0.3rem, -0.15rem); opacity: 0.9; }
+        }
+        .sd-fighter--enemy.sd-anim-evade .sd-pose {
+            animation-name: sd-evade-pose-enemy;
+        }
+        @keyframes sd-evade-pose-enemy {
+            0%, 100% { transform: translate(0, 0); opacity: 1; }
+            25% { transform: translate(-0.8rem, -0.6rem) scale(0.92); opacity: 0.35; }
+            50% { transform: translate(0.5rem, 0.2rem) scale(1.02); opacity: 0.75; }
+            75% { transform: translate(-0.3rem, -0.15rem); opacity: 0.9; }
+        }
+        .sd-fighter.sd-anim-hit .sd-pose {
+            animation: sd-hit-flinch 0.38s ease;
+        }
+        @keyframes sd-hit-flinch {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-0.45rem); }
+            45% { transform: translateX(0.35rem); }
+            70% { transform: translateX(-0.15rem); }
+        }
+        .sd-fighter.sd-anim-hit .sd-sprite {
+            animation: sd-hit-flash 0.38s ease;
+        }
+        @keyframes sd-hit-flash {
+            0%, 100% { opacity: 1; }
+            20% { opacity: 0.45; }
+            50% { opacity: 0.82; }
+        }
+        .sd-fighter--enemy.sd-anim-hit .sd-pose {
+            animation-name: sd-hit-flinch-enemy;
+        }
+        @keyframes sd-hit-flinch-enemy {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(0.45rem); }
+            45% { transform: translateX(-0.35rem); }
+            70% { transform: translateX(0.15rem); }
+        }
+        .sd-fighter.sd-anim-skill .sd-pose {
+            animation: sd-skill-pose 0.62s ease;
+        }
+        .sd-fighter.sd-anim-skill::after {
+            content: '';
+            position: absolute;
+            top: 30%;
+            left: 50%;
+            width: 3rem;
+            height: 3rem;
+            margin-left: -1.5rem;
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.55), transparent 65%);
+            border-radius: 50%;
+            animation: sd-skill-glow 0.62s ease;
+            pointer-events: none;
+        }
+        @keyframes sd-skill-pose {
+            0%, 100% { transform: scale(1); }
+            30% { transform: scale(1.08) translateY(-0.25rem); }
+            60% { transform: scale(1.02) translateX(0.6rem); }
+        }
+        @keyframes sd-skill-glow {
+            0% { opacity: 0; transform: scale(0.5); }
+            40% { opacity: 1; transform: scale(1.2); }
+            100% { opacity: 0; transform: scale(1.5); }
         }
 
         /* 습득 무공 패널 */
@@ -411,12 +864,13 @@
                             <svg id="node-map-svg" class="node-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"></svg>
                             <div id="map-toast" class="hidden opacity-0"></div>
                         </div>
-                        <div id="travel-list" class="w-32 shrink-0"></div>
+                        <div id="travel-list" class="w-36 shrink-0"></div>
                     </div>
                     <div class="mt-2 flex flex-wrap gap-3 text-xs text-zinc-500">
                         <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-600 border border-amber-400 mr-1"></span>현재</span>
                         <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-green-900 border border-green-400 mr-1"></span>이동가능</span>
-                        <span>선 위 숫자 = 소요 일수</span>
+                        <span><span class="inline-block w-2.5 h-2.5 rounded-full bg-zinc-700 border border-zinc-500 mr-1"></span>❓ 미개척</span>
+                        <span>미개척만 ❓ · 유명한 곳은 이름 표시 · 현장은 탐색·정보로 지명 해금</span>
                     </div>
                 </div>
             </div>
@@ -535,35 +989,69 @@
         <div class="bg-zinc-900 border-2 border-amber-700 rounded-3xl w-full max-w-2xl mx-4">
             <div class="p-8">
                 <h2 id="battle-modal-title" class="text-2xl font-bold text-amber-400 text-center mb-6">⚔️ 전투</h2>
-                <div class="flex justify-between items-start mb-6">
-                    <div class="text-center flex-1">
-                        <div id="player-battle-avatar" class="sd-hero-masked mx-auto mb-2" style="width:64px;height:64px">
-                            <div class="hero-body"></div>
-                            <div class="hero-mask"></div>
-                            <div class="hero-hat"></div>
+                <div class="battle-arena mb-4">
+                    <div class="battle-grid battle-grid--stage">
+                        <div class="battle-cell battle-cell--player">
+                            <div id="player-battle-sd" class="sd-fighter sd-fighter--player"></div>
                         </div>
-                        <div id="player-battle-name" class="font-bold">무명객</div>
-                        <div id="player-battle-sub" class="text-xs text-zinc-500">별호 없음 · 성향 중립</div>
-                        <div class="hp-bar mt-2 w-32 mx-auto">
-                            <div id="player-hp-bar" class="hp-fill hp-fill-player" style="width:100%"></div>
+                        <div class="battle-cell battle-cell--vs">VS</div>
+                        <div class="battle-cell battle-cell--enemy">
+                            <div id="enemy-battle-sd" class="sd-fighter sd-fighter--enemy"></div>
                         </div>
-                        <div id="player-hp-text" class="text-xs text-zinc-400 mt-1">120/120</div>
-                        <div class="hp-bar mt-1 w-32 mx-auto">
-                            <div id="player-ng-bar" class="hp-fill ng-fill" style="width:100%"></div>
-                        </div>
-                        <div id="player-ng-text" class="text-xs text-blue-400 mt-1">80/80</div>
                     </div>
-                    <div class="text-4xl font-bold text-amber-500 self-center">VS</div>
-                    <div class="text-center flex-1">
-                        <div class="sd-placeholder mx-auto mb-2 text-3xl" id="enemy-icon">👹</div>
-                        <div id="enemy-name" class="font-bold">산적</div>
-                        <div class="hp-bar mt-2 w-32 mx-auto">
-                            <div id="enemy-hp-bar" class="hp-fill hp-fill-enemy" style="width:100%"></div>
+                    <div class="battle-grid battle-grid--hud">
+                        <div class="battle-cell battle-cell--player">
+                            <div id="player-battle-name" class="battle-hud-name">무명객</div>
+                            <div id="player-battle-sub" class="battle-hud-sub">별호 없음 · 성향 중립</div>
+                            <div class="battle-bars">
+                                <div class="battle-bar-row">
+                                    <div class="hp-bar w-full">
+                                        <div id="player-hp-bar" class="hp-fill hp-fill-player" style="width:100%"></div>
+                                    </div>
+                                    <div id="player-hp-text" class="battle-bar-label text-zinc-400">120/120</div>
+                                </div>
+                                <div class="battle-bar-row">
+                                    <div class="hp-bar w-full">
+                                        <div id="player-ng-bar" class="hp-fill ng-fill" style="width:100%"></div>
+                                    </div>
+                                    <div id="player-ng-text" class="battle-bar-label text-blue-400">80/80</div>
+                                </div>
+                                <div class="battle-bar-row">
+                                    <div class="hp-bar w-full">
+                                        <div id="player-stamina-bar" class="hp-fill stamina-fill" style="width:100%"></div>
+                                    </div>
+                                    <div id="player-stamina-text" class="battle-bar-label text-lime-400">스테미나 100/100</div>
+                                </div>
+                            </div>
                         </div>
-                        <div id="enemy-hp-text" class="text-xs text-zinc-400 mt-1">60/60</div>
+                        <div class="battle-cell battle-cell--vs" aria-hidden="true">VS</div>
+                        <div class="battle-cell battle-cell--enemy">
+                            <div id="enemy-name" class="battle-hud-name">산적</div>
+                            <div class="battle-hud-sub battle-hud-sub--spacer" aria-hidden="true">—</div>
+                            <div class="battle-bars">
+                                <div class="battle-bar-row">
+                                    <div class="hp-bar w-full">
+                                        <div id="enemy-hp-bar" class="hp-fill hp-fill-enemy" style="width:100%"></div>
+                                    </div>
+                                    <div id="enemy-hp-text" class="battle-bar-label text-zinc-400">60/60</div>
+                                </div>
+                                <div class="battle-bar-row battle-bar-row--placeholder" aria-hidden="true">
+                                    <div class="hp-bar w-full">
+                                        <div class="hp-fill ng-fill" style="width:0%"></div>
+                                    </div>
+                                    <div class="battle-bar-label">—</div>
+                                </div>
+                                <div class="battle-bar-row">
+                                    <div class="hp-bar w-full">
+                                        <div id="enemy-stamina-bar" class="hp-fill stamina-fill" style="width:100%"></div>
+                                    </div>
+                                    <div id="enemy-stamina-text" class="battle-bar-label text-lime-400/80">스테미나 100/100</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div id="battle-log" class="bg-zinc-800/50 rounded-xl p-4 mb-6 max-h-28 overflow-y-auto space-y-1"></div>
+                <div id="battle-log" class="bg-zinc-800/50 rounded-xl px-3 py-2 mb-6"></div>
                 <div id="battle-actions" class="grid grid-cols-2 gap-4 battle-actions-grid"></div>
             </div>
         </div>
@@ -594,6 +1082,21 @@
                 <i class="fas fa-check mr-1"></i>확인
             </button>
         </div>
+    </div>
+
+    <!-- Debug panel (?debug=1 또는 콘솔 debugLog.enable()) -->
+    <div id="debug-panel" class="hidden" aria-live="polite">
+        <div class="debug-head">
+            <span>🐛 DEBUG</span>
+            <span class="flex gap-1">
+                <button type="button" class="debug-btn" onclick="debugLog.snapshot('manual')">snap</button>
+                <button type="button" class="debug-btn" onclick="debugLog.printDump()">dump</button>
+                <button type="button" class="debug-btn" onclick="debugLog.clear()">clr</button>
+                <button type="button" class="debug-btn" onclick="debugLog.disable()">off</button>
+            </span>
+        </div>
+        <div id="debug-flags">—</div>
+        <div id="debug-lines"></div>
     </div>
 
     <script type="module" src="js/main.js"></script>

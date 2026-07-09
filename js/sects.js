@@ -3,13 +3,195 @@ import * as ui from './ui.js';
 import * as battle from './battle.js';
 import * as hero from './hero.js';
 import * as realm from './realm.js';
+import * as quests from './quests.js';
+import * as martial from './martial.js';
+import * as encounters from './encounters.js';
 
 export const SECT_JOIN_AFFINITY = 50;
+
+/** 문파별 입문 권유 보상 — 자진 입문에는 미적용 */
+const SECT_JOIN_PACKAGES = {
+    '청성파': {
+        arts: [
+            { id: 'cheongseong_sword', level: 2 },
+            { id: 'cheongseong_step', level: 1 },
+        ],
+        masteryExp: 48,
+        uniform: { name: '청성도포', icon: '☯️', desc: '청성파 제자 무복' },
+    },
+    '아미파': {
+        arts: [
+            { id: 'emei_sword', level: 2 },
+            { id: 'emei_step', level: 1 },
+        ],
+        masteryExp: 48,
+        uniform: { name: '아미제복', icon: '🔔', desc: '아미파 제자 무복' },
+    },
+    '소검파': {
+        arts: [{ id: 'sogeom_sword', level: 2 }],
+        masteryExp: 40,
+        uniform: { name: '소검도복', icon: '⚔️', desc: '소검파 제자 무복' },
+    },
+    '당가': {
+        arts: [{ id: 'tang_hidden', level: 2 }],
+        masteryExp: 40,
+        uniform: { name: '당가외가복', icon: '🎯', desc: '당가 제자 무복' },
+    },
+    '산적소굴': {
+        arts: [{ id: 'sapa_brutal', level: 2 }],
+        masteryExp: 36,
+        uniform: { name: '사파망토', icon: '🗡️', desc: '사파 무인 무복' },
+    },
+};
 export const SECT_LEADER_AFFINITY = 85;
 export const SECT_LEADER_MIN_LEVEL = 28;
 export const SECT_LEADER_MIN_REALM = 4;
 export const GRAND_MASTER_LEVEL = 55;
 export const GRAND_MASTER_REALM = 6;
+/** 최소 레벨보다 2 이상 낮으면 대련 거부 (1 낮으면 대련비) */
+export const SPAR_REJECT_GAP = 2;
+
+/** 대련·견식 횟수 주기 (게임 내 일수) */
+export const SPAR_CYCLE_DAYS = 10;
+export const OBSERVE_CYCLE_DAYS = 7;
+
+function getSparCycleLimit(sect) {
+    if (sect?.sparCycleLimit != null) return sect.sparCycleLimit;
+    if (sect?.sparDailyLimit != null) return sect.sparDailyLimit;
+    if (sect?.tier === '본문') return 1;
+    if (sect?.tier === '분파') return 2;
+    return 3;
+}
+
+function getObserveCycleLimit(sect) {
+    if (sect?.observeCycleLimit != null) return sect.observeCycleLimit;
+    if (sect?.observeDailyLimit != null) return sect.observeDailyLimit;
+    if (sect?.tier === '본문') return 1;
+    if (sect?.tier === '분파') return 2;
+    return 3;
+}
+
+function syncSectActivityCycle(gs, logKey, sectId, cycleDays) {
+    if (!gs[logKey]) gs[logKey] = {};
+    let entry = gs[logKey][sectId];
+    if (!entry) {
+        entry = { count: 0, cycleStartDay: gs.day };
+        gs[logKey][sectId] = entry;
+        return entry;
+    }
+    if (entry.cycleStartDay == null) entry.cycleStartDay = gs.day;
+    if (gs.day - entry.cycleStartDay >= cycleDays) {
+        entry.count = 0;
+        entry.cycleStartDay = gs.day;
+    }
+    return entry;
+}
+
+function getSectActivityMeta(gs, logKey, sectId, cycleDays) {
+    const entry = syncSectActivityCycle(gs, logKey, sectId, cycleDays);
+    const elapsed = gs.day - entry.cycleStartDay;
+    const daysLeft = Math.max(0, cycleDays - elapsed);
+    return {
+        used: entry.count || 0,
+        cycleStartDay: entry.cycleStartDay,
+        cycleDays,
+        daysLeft,
+        daysUntilReset: daysLeft > 0 ? daysLeft : cycleDays,
+    };
+}
+
+function recordSectActivity(gs, logKey, sectId, cycleDays) {
+    const entry = syncSectActivityCycle(gs, logKey, sectId, cycleDays);
+    entry.count = (entry.count || 0) + 1;
+    if (logKey === 'sectSparLog') {
+        if (!gs.sectSparLifetime) gs.sectSparLifetime = {};
+        gs.sectSparLifetime[sectId] = (gs.sectSparLifetime[sectId] || 0) + 1;
+    }
+}
+
+/** 날짜 진행 훅 — 대련·견식은 주기 기반으로 자동 갱신 */
+export function onDayAdvanced() {}
+
+/** 견식 가능 여부 — UI·로직 공통 */
+export function getObserveAccess(sectId, gs = state.gameState) {
+    const sect = getSect(sectId);
+    if (!sect) return { ok: false, reason: 'unknown' };
+
+    const cycleLimit = getObserveCycleLimit(sect);
+    const meta = getSectActivityMeta(gs, 'sectObserveLog', sectId, OBSERVE_CYCLE_DAYS);
+    if (meta.used >= cycleLimit) {
+        return { ok: false, reason: 'limit', ...meta, cycleLimit };
+    }
+    return { ok: true, ...meta, cycleLimit };
+}
+
+export function formatObserveHint(access) {
+    if (!access.ok) {
+        if (access.reason === 'limit') {
+            return `${access.cycleDays}일 주기 한도 소진 (${access.used}/${access.cycleLimit}회 · ${access.daysUntilReset}일 후 초기화)`;
+        }
+        return '견식 불가';
+    }
+    return `1일 소모 · 우호 상승 · ${access.cycleDays}일간 ${access.used}/${access.cycleLimit}회`;
+}
+
+/** 대련 가능 여부 — UI·로직 공통 */
+export function getSparringAccess(sectId, gs = state.gameState) {
+    const sect = getSect(sectId);
+    if (!sect) return { ok: false, reason: 'unknown' };
+
+    const cycleLimit = getSparCycleLimit(sect);
+    const meta = getSectActivityMeta(gs, 'sectSparLog', sectId, SPAR_CYCLE_DAYS);
+    const quota = { ...meta, cycleLimit, minLevel: sect.minSparLevel };
+
+    if (meta.used >= cycleLimit) {
+        return { ok: false, reason: 'limit', ...quota };
+    }
+
+    if (gs.level >= sect.minSparLevel) {
+        return { ok: true, free: true, fee: 0, ...quota };
+    }
+
+    const gap = sect.minSparLevel - gs.level;
+    if (gap >= SPAR_REJECT_GAP) {
+        return { ok: false, reason: 'too_weak', gap, ...quota };
+    }
+
+    if (gs.gold < sect.sparFee) {
+        return {
+            ok: false,
+            reason: 'no_gold',
+            fee: sect.sparFee,
+            gold: gs.gold,
+            ...quota,
+        };
+    }
+
+    return {
+        ok: true,
+        free: false,
+        fee: sect.sparFee,
+        ...quota,
+    };
+}
+
+export function formatSparringHint(access, sect) {
+    if (!access.ok) {
+        if (access.reason === 'limit') {
+            return `${access.cycleDays}일 주기 한도 소진 (${access.used}/${access.cycleLimit}회 · ${access.daysUntilReset}일 후 초기화)`;
+        }
+        if (access.reason === 'too_weak') {
+            return `Lv.${access.minLevel} 미만 — 실력 부족으로 거부`;
+        }
+        if (access.reason === 'no_gold') {
+            return `Lv.${access.minLevel} 미만 — ${access.fee}냥 필요 (보유 ${access.gold}냥)`;
+        }
+        return '대련 불가';
+    }
+    const quota = `${access.cycleDays}일간 ${access.used}/${access.cycleLimit}회`;
+    if (access.free) return `Lv.${access.minLevel} 이상 — 대련 가능 · ${quota}`;
+    return `Lv.${access.minLevel} 미만 — ${access.fee}냥으로 대련 · ${quota}`;
+}
 
 export function getSectFamilyName(sect) {
     if (!sect) return '';
@@ -74,21 +256,194 @@ export function checkSectStanding(gs = state.gameState) {
         return promoteSectLeader(gs, best, '');
     }
 
-    if (!standing && best) {
-        const memberTitle = best.sect.tier === '본문' ? '내문제자' : best.sect.tier === '분파' ? '외문제자' : '속가제자';
-        gs.sectStanding = {
-            sectId: best.sectId,
-            sectName: best.sect.name,
-            sectFamily: best.family,
-            rank: 'disciple',
-            memberTitle,
-            joinedDay: gs.day,
-        };
-        state.addLog(`🏯 ${best.family}에 입문했다. 별호는 아직 없으나 문파 소속이 붙었다.`);
-        return gs.sectStanding;
+    return standing || null;
+}
+
+function memberTitleForTier(tier) {
+    if (tier === '본문') return '내문제자';
+    if (tier === '분파') return '외문제자';
+    return '속가제자';
+}
+
+function passesSectJoinDisposition(sect, aff, gs = state.gameState) {
+    const disp = hero.getDisposition(gs);
+    if (sect.faction === '사파' && disp.short !== '사') return false;
+    if (sect.faction === '정파' && disp.short === '사' && aff < 70) return false;
+    return true;
+}
+
+function getSectJoinPackage(sect) {
+    const family = getSectFamilyName(sect);
+    return SECT_JOIN_PACKAGES[family] || null;
+}
+
+export function getSectJoinPreview(sectId) {
+    const sect = getSect(sectId);
+    const pkg = getSectJoinPackage(sect);
+    if (!pkg) return null;
+    return {
+        artNames: (pkg.arts || []).map(a => martial.getArtDef(a.id)?.name || a.id),
+        uniformName: pkg.uniform?.name || '무복',
+    };
+}
+
+function markSectJoinOffered(sectId, status, gs = state.gameState) {
+    if (!gs.sectJoinOffered) gs.sectJoinOffered = {};
+    gs.sectJoinOffered[sectId] = status;
+}
+
+export function getSectJoinOfferStatus(sectId, gs = state.gameState) {
+    return gs.sectJoinOffered?.[sectId] || null;
+}
+
+/** 입문 권유 가능 — 대련 승리 후 1회만 */
+export function canInviteToSect(sectId, gs = state.gameState) {
+    if (gs.sectStanding) return false;
+    if (getSectJoinOfferStatus(sectId, gs)) return false;
+    const sect = getSect(sectId);
+    if (!sect) return false;
+    const aff = getAffinity(sectId);
+    if (aff < SECT_JOIN_AFFINITY) return false;
+    return passesSectJoinDisposition(sect, aff, gs);
+}
+
+/** 자진 입문 — 우호 충분 시 언제든 가능, 숙련 보상 없음 */
+export function canVoluntaryJoin(sectId, gs = state.gameState) {
+    if (gs.sectStanding) return false;
+    const sect = getSect(sectId);
+    if (!sect) return false;
+    const aff = getAffinity(sectId);
+    if (aff < SECT_JOIN_AFFINITY) return false;
+    if (!passesSectJoinDisposition(sect, aff, gs)) return false;
+    const offer = getSectJoinOfferStatus(sectId, gs);
+    if (offer === 'pending') return false;
+    if (offer === 'accepted') return false;
+    return true;
+}
+
+function applyInviteJoinRewards(sect, gs = state.gameState) {
+    const pkg = getSectJoinPackage(sect);
+    if (!pkg) return [];
+
+    const notes = [];
+    const artIds = [];
+
+    for (const row of pkg.arts || []) {
+        const result = martial.learnSectMartialArt(row.id, row.level);
+        if (!result) continue;
+        artIds.push(row.id);
+        if (result.learned) {
+            notes.push(`${result.name} 습득`);
+        } else if (result.leveled) {
+            notes.push(`${result.name} Lv.${result.level}`);
+        }
     }
 
-    return standing || null;
+    if (pkg.masteryExp && artIds.length) {
+        const ups = martial.grantMartialExpToArts(artIds, pkg.masteryExp, gs);
+        if (ups.length) {
+            const names = [...new Set(ups.map(u => u.name))];
+            notes.push(`숙련 상승: ${names.join(', ')}`);
+        } else {
+            notes.push('문파 무공 숙련도 상승');
+        }
+    }
+
+    if (pkg.uniform) {
+        const family = getSectFamilyName(sect);
+        gs.hero = gs.hero || {};
+        gs.hero.uniform = { ...pkg.uniform, sectFamily: family };
+        notes.push(`${pkg.uniform.name} 지급`);
+    }
+
+    return notes;
+}
+
+function joinSectCore(sectId, method = 'voluntary') {
+    const gs = state.gameState;
+    const sect = getSect(sectId);
+    if (!sect || gs.sectStanding) return false;
+
+    const family = getSectFamilyName(sect);
+    gs.sectStanding = {
+        sectId,
+        sectName: sect.name,
+        sectFamily: family,
+        rank: 'disciple',
+        memberTitle: memberTitleForTier(sect.tier),
+        joinedDay: gs.day,
+        joinMethod: method,
+    };
+    markSectJoinOffered(sectId, 'accepted', gs);
+    return true;
+}
+
+export function acceptSectJoin(sectId) {
+    const gs = state.gameState;
+    const sect = getSect(sectId);
+    const offer = getSectJoinOfferStatus(sectId, gs);
+    if (!sect || gs.sectStanding || offer !== 'pending') {
+        ui.updateAllUI();
+        return;
+    }
+
+    const family = getSectFamilyName(sect);
+    if (!joinSectCore(sectId, 'invited')) {
+        ui.updateAllUI();
+        return;
+    }
+
+    const rewardNotes = applyInviteJoinRewards(sect, gs);
+    const rewardText = rewardNotes.length ? ` · ${rewardNotes.join(' · ')}` : '';
+    state.addLog(`🏯 ${family}에 입문했다 (권유 입문).${rewardText}`);
+    gs.placeUI = { view: 'sect', sectId };
+    ui.updateAllUI();
+}
+
+export function voluntaryJoinSect(sectId) {
+    const gs = state.gameState;
+    const sect = getSect(sectId);
+    if (!sect || !canVoluntaryJoin(sectId, gs)) {
+        ui.updateAllUI();
+        return;
+    }
+
+    const family = getSectFamilyName(sect);
+    joinSectCore(sectId, 'voluntary');
+    state.addLog(`🏯 ${family}에 자진 입문했다. 문파 무공 전수·숙련 보상은 없다.`);
+    gs.placeUI = { view: 'sect', sectId };
+    ui.updateAllUI();
+}
+
+export function declineSectJoin(sectId) {
+    const gs = state.gameState;
+    const sect = getSect(sectId);
+    if (getSectJoinOfferStatus(sectId, gs) !== 'pending') {
+        ui.updateAllUI();
+        return;
+    }
+    markSectJoinOffered(sectId, 'declined', gs);
+    if (sect) {
+        state.addLog(`${sect.name}의 입문 권유를 사양했다. 우호가 유지되면 나중에 자진 입문할 수 있다.`);
+    }
+    gs.placeUI = { view: 'sect', sectId };
+    ui.updateAllUI();
+}
+
+export function reopenSectJoinOffer(sectId) {
+    const gs = state.gameState;
+    if (getSectJoinOfferStatus(sectId, gs) !== 'pending' || gs.sectStanding) {
+        ui.updateAllUI();
+        return;
+    }
+    gs.placeUI = { view: 'sectJoin', sectId };
+    ui.updateAllUI();
+}
+
+function offerSectJoin(sectId) {
+    markSectJoinOffered(sectId, 'pending', state.gameState);
+    state.gameState.placeUI = { view: 'sectJoin', sectId };
+    ui.updateAllUI();
 }
 
 export function tryFoundSect(gs = state.gameState) {
@@ -170,20 +525,20 @@ export const SECTS = {
     },
     emei_main: {
         id: 'emei_main',
-        name: '峨嵋파',
+        name: '아미파',
         tier: '본문',
         icon: '🔔',
         faction: '정파',
-        desc: '여협 정파의 성지. 峨嵋 검법의 본문.',
+        desc: '여협 정파의 성지. 아미 검법의 본문.',
         minSparLevel: 7,
         sparFee: 50,
-        sparEnemy: { name: '峨嵋 제자', hp: 80, atk: 18, def: 10 },
+        sparEnemy: { name: '아미 제자', hp: 80, atk: 18, def: 10 },
         guardian: { name: '금정 검사', hp: 145, atk: 24, def: 14 },
         canTrain: false,
     },
     emei_branch: {
         id: 'emei_branch',
-        name: '峨嵋파 금정 분파',
+        name: '아미파 금정 분파',
         tier: '분파',
         icon: '⛩️',
         faction: '정파',
@@ -197,7 +552,7 @@ export const SECTS = {
     },
     emei_lay: {
         id: 'emei_lay',
-        name: '峨嵋 속가 암자',
+        name: '아미 속가 암자',
         tier: '속가',
         icon: '🕯️',
         faction: '정파',
@@ -225,6 +580,7 @@ export const SECTS = {
     tang_clan: {
         id: 'tang_clan',
         name: '당가 지국',
+        familyName: '당가',
         tier: '분파',
         icon: '🎯',
         faction: '정파',
@@ -255,6 +611,22 @@ export function getSect(id) {
     return SECTS[id] || null;
 }
 
+/** 도장깨기 최소 레벨 — 대련보다 한 단계 높은 문파별 기준 */
+export function getMinDojoLevel(sect) {
+    if (!sect) return 99;
+    if (sect.minDojoLevel != null) return sect.minDojoLevel;
+    const bonus = sect.tier === '본문' ? 4 : sect.tier === '분파' ? 3 : 2;
+    return sect.minSparLevel + bonus;
+}
+
+export function canChallengeDojo(sectId, gs = state.gameState) {
+    const sect = getSect(sectId);
+    if (!sect) return { ok: false, minLevel: 99, reason: '알 수 없는 문파' };
+    const minLevel = getMinDojoLevel(sect);
+    if (gs.level >= minLevel) return { ok: true, minLevel };
+    return { ok: false, minLevel, reason: `Lv.${minLevel} 이상 필요 (현재 Lv.${gs.level})` };
+}
+
 export function getAffinity(sectId) {
     const gs = state.gameState;
     if (!gs.sectAffinity) gs.sectAffinity = {};
@@ -266,8 +638,19 @@ export function modifyAffinity(sectId, delta) {
     if (!gs.sectAffinity) gs.sectAffinity = {};
     const next = Math.max(-50, Math.min(100, (gs.sectAffinity[sectId] ?? 0) + delta));
     gs.sectAffinity[sectId] = next;
-    hero.checkSectStanding(gs);
+    checkSectStanding(gs);
     return next;
+}
+
+/** 우호 소모 — 0 미만으로 내려가지 않음 */
+export function spendAffinity(sectId, amount, gs = state.gameState) {
+    if (!gs.sectAffinity) gs.sectAffinity = {};
+    const cur = gs.sectAffinity[sectId] ?? 0;
+    const spent = Math.min(Math.max(0, amount), cur);
+    const next = cur - spent;
+    gs.sectAffinity[sectId] = next;
+    checkSectStanding(gs);
+    return { next, spent };
 }
 
 export function getAffinityLabel(value) {
@@ -279,65 +662,95 @@ export function getAffinityLabel(value) {
     return { label: '적대', color: 'text-red-400' };
 }
 
-/** 견식 — 우호 소폭 상승 */
+/** 견식 — 우호 소폭 상승, 주기별 횟수 제한 */
 export function observeSect(sectId) {
     const sect = getSect(sectId);
     if (!sect) return;
+
+    const access = getObserveAccess(sectId);
     const gs = state.gameState;
-    gs.day += 1;
-    const gain = sect.tier === '본문' ? 4 : sect.tier === '분파' ? 5 : 6;
-    const aff = modifyAffinity(sectId, gain);
-    state.gainExp(8 + gs.level);
-    state.addLog(`🙏 ${sect.name}에서 견식. 우호도 +${gain} (${getAffinityLabel(aff).label})`);
-    closeSectPanel();
-    ui.updateAllUI();
-}
-
-/** 대련 — 레벨 낮으면 비용 or 거부 */
-export function requestSparring(sectId) {
-    const sect = getSect(sectId);
-    const gs = state.gameState;
-    if (!sect) return;
-
-    const levelOk = gs.level >= sect.minSparLevel;
-    const paid = !levelOk && gs.gold >= sect.sparFee;
-
-    if (!levelOk && !paid) {
-        if (gs.level < sect.minSparLevel - 2) {
-            state.addLog(`⚔️ ${sect.name}: "실력이 부족하다. 나중에 오라." (필요 Lv.${sect.minSparLevel})`);
-        } else {
-            state.addLog(`⚔️ ${sect.name}: "대련은 ${sect.sparFee}냥을 내야 한다." (은전 부족)`);
+    if (!access.ok) {
+        if (access.reason === 'limit') {
+            state.addLog(`🙏 ${sect.name}: "이번 주기 견식은 여기까지다." (${access.used}/${access.cycleLimit}회 · ${access.daysUntilReset}일 후)`);
         }
+        gs.placeUI = { view: 'sect', sectId };
         ui.updateAllUI();
         return;
     }
 
-    if (paid) {
-        state.modifyStats({ gold: gs.gold - sect.sparFee });
-        state.addLog(`${sect.name}에 대련비 ${sect.sparFee}냥을 냈다.`);
+    recordSectActivity(gs, 'sectObserveLog', sectId, OBSERVE_CYCLE_DAYS);
+    const usedNow = getSectActivityMeta(gs, 'sectObserveLog', sectId, OBSERVE_CYCLE_DAYS).used;
+    gs.day += 1;
+    const gain = sect.tier === '본문' ? 4 : sect.tier === '분파' ? 5 : 6;
+    const aff = modifyAffinity(sectId, gain);
+    state.gainExp(8 + gs.level);
+    state.addLog(`🙏 ${sect.name}에서 견식. 우호도 +${gain} (${getAffinityLabel(aff).label}) · ${OBSERVE_CYCLE_DAYS}일간 ${usedNow}/${access.cycleLimit}회`);
+    gs.placeUI = { view: 'sect', sectId };
+    ui.updateAllUI();
+}
+
+/** 대련 — 레벨 미달 시 대련비, 2렙 이상 차이면 거부, 일일 횟수 제한 */
+export function requestSparring(sectId) {
+    const gs = state.gameState;
+    const sect = getSect(sectId);
+    if (!sect) return;
+
+    const access = getSparringAccess(sectId, gs);
+    if (!access.ok) {
+        if (access.reason === 'too_weak') {
+            state.addLog(`⚔️ ${sect.name}: "실력이 부족하다. 나중에 오라." (필요 Lv.${access.minLevel})`);
+        } else if (access.reason === 'no_gold') {
+            state.addLog(`⚔️ ${sect.name}: "대련은 ${access.fee}냥을 내야 한다." (보유 ${access.gold}냥)`);
+        } else if (access.reason === 'limit') {
+            state.addLog(`⚔️ ${sect.name}: "이번 주기 대련은 여기까지다." (${access.used}/${access.cycleLimit}회 · ${access.daysUntilReset}일 후)`);
+        }
+        gs.placeUI = { view: 'sect', sectId };
+        ui.updateAllUI();
+        return;
     }
 
-    const enemy = { ...sect.sparEnemy, maxHp: sect.sparEnemy.hp };
+    const paid = !access.free;
+    if (paid) {
+        const cur = state.gameState;
+        if (cur.gold < access.fee) {
+            state.addLog(`⚔️ ${sect.name}: "대련은 ${access.fee}냥을 내야 한다." (보유 ${cur.gold}냥)`);
+            ui.updateAllUI();
+            return;
+        }
+        state.modifyStats({ gold: cur.gold - access.fee });
+        state.addLog(`${sect.name}에 대련비 ${access.fee}냥을 냈다.`);
+    }
+
+    const sparMeta = getSectActivityMeta(gs, 'sectSparLog', sectId, SPAR_CYCLE_DAYS);
+    const lifetime = gs.sectSparLifetime?.[sectId] || 0;
+    const enemy = encounters.buildSectSparEnemy(sect, sectId, gs, {
+        cycleCount: sparMeta.used,
+        lifetimeCount: lifetime,
+    });
+    recordSectActivity(gs, 'sectSparLog', sectId, SPAR_CYCLE_DAYS);
+
     battle.startBattleFromEnemy(enemy, 'spar', (won) => {
-        const g = state.gameState;
+        const g = gs;
         if (won) {
             const affGain = paid ? 3 : 6;
             const fameGain = sect.faction === '사파' ? 0 : 2;
             const aff = modifyAffinity(sectId, affGain);
             state.gainExp(12 + g.level * 2);
-            if (fameGain) state.applyChivalryChange(fameGain);
-            state.addLog(`⚔️ ${sect.name} 대련 승! 우호 +${affGain}${fameGain ? `, 명성 +${fameGain}` : ''} (${getAffinityLabel(aff).label})`);
+            if (fameGain) state.applyHyeophaengChange(fameGain);
+            quests.onSparVictory(sectId);
+            state.addLog(`⚔️ ${sect.name} 대련 승! 우호 +${affGain}${fameGain ? `, 협행 +${fameGain}` : ''} (${getAffinityLabel(aff).label})`);
+            if (canInviteToSect(sectId, state.gameState)) {
+                offerSectJoin(sectId);
+                return;
+            }
         } else {
             const aff = modifyAffinity(sectId, -1);
             state.gainExp(5);
             state.addLog(`⚔️ ${sect.name} 대련 패배. 우호 -1 (미미) (${getAffinityLabel(aff).label})`);
         }
-        closeSectPanel();
-        ui.updateAllUI();
+        openSectPanel(sectId);
     });
 }
-
-const MAIN_HQ_IDS = new Set(['cheongseong_main', 'emei_main']);
 
 let dojoRun = null;
 
@@ -353,85 +766,58 @@ function scaleFighter(base, gs, mult = 1) {
     };
 }
 
-function bossFighter(sect, gs) {
-    const g = sect.guardian;
-    return scaleFighter({
-        name: `${sect.name} ${g.name}`,
-        hp: g.hp,
-        atk: g.atk,
-        def: g.def,
-    }, gs, 1.15);
+function dojoDirectDisciple(sect, gs) {
+    const spar = sect.sparEnemy;
+    const family = getSectFamilyName(sect);
+    return {
+        ...scaleFighter({
+            name: `${family} 직계제자`,
+            hp: Math.floor(spar.hp * 1.15),
+            atk: Math.floor(spar.atk * 1.12),
+            def: Math.floor(spar.def * 1.08),
+        }, gs, 1.02),
+        faction: sect.faction,
+    };
 }
 
-/** 도장깨기 단계 구성 */
+function dojoElder(sect, gs) {
+    const g = sect.guardian;
+    const family = getSectFamilyName(sect);
+    return {
+        ...scaleFighter({
+            name: `${family} 장로`,
+            hp: Math.floor(g.hp * 0.8),
+            atk: Math.floor(g.atk * 0.9),
+            def: Math.floor(g.def * 0.88),
+        }, gs, 1.1),
+        faction: sect.faction,
+    };
+}
+
+function dojoLeader(sect, gs) {
+    const g = sect.guardian;
+    const family = getSectFamilyName(sect);
+    return {
+        ...scaleFighter({
+            name: `${family} 장문인`,
+            hp: g.hp,
+            atk: g.atk,
+            def: g.def,
+        }, gs, 1.2),
+        faction: sect.faction,
+    };
+}
+
+/** 도장깨기 — 고정 3단계: 직계제자 → 장로 → 장문인 */
 export function buildDojoPlan(sect, fame, level) {
     const gs = { level, fame };
-    const g = sect.guardian;
-    const spar = sect.sparEnemy;
-
-    if (sect.tier === '속가') {
-        if (fame >= 10) {
-            return {
-                stages: [bossFighter(sect, gs)],
-                note: `명성 ${fame} — 원주(${g.name})와 직접 대결`,
-            };
-        }
-        if (fame >= 5) {
-            return {
-                stages: [
-                    scaleFighter({ name: `${sect.name} ${spar.name}`, ...spar }, gs, 0.9),
-                    bossFighter(sect, gs),
-                ],
-                note: '2단계 — 제자 → 원주',
-            };
-        }
-        return {
-            stages: [
-                scaleFighter({ name: `${sect.name} ${spar.name}`, ...spar }, gs, 0.85),
-                scaleFighter({ name: `${sect.name} 호법`, hp: Math.floor(g.hp * 0.65), atk: Math.floor(g.atk * 0.75), def: Math.floor(g.def * 0.8) }, gs, 1),
-                bossFighter(sect, gs),
-            ],
-            note: '3단계 — 제자 → 호법 → 원주',
-        };
-    }
-
-    if (sect.tier === '분파') {
-        if (fame >= 18) {
-            return {
-                stages: [bossFighter(sect, gs)],
-                note: `명성 ${fame} — 원주(${g.name})와 직접 대결`,
-            };
-        }
-        if (fame >= 8) {
-            return {
-                stages: [
-                    scaleFighter({ name: `${sect.name} ${spar.name}`, ...spar }, gs, 0.95),
-                    bossFighter(sect, gs),
-                ],
-                note: '2단계 — 제자 → 원주',
-            };
-        }
-        return {
-            stages: [
-                scaleFighter({ name: `${sect.name} ${spar.name}`, ...spar }, gs, 0.9),
-                scaleFighter({ name: `${sect.name} 검사`, hp: Math.floor(g.hp * 0.72), atk: Math.floor(g.atk * 0.8), def: Math.floor(g.def * 0.85) }, gs, 1),
-                bossFighter(sect, gs),
-            ],
-            note: '3단계 — 제자 → 검사 → 원주',
-        };
-    }
-
-    const stageCount = MAIN_HQ_IDS.has(sect.id) ? 5 : 4;
-    const ladder = [
-        scaleFighter({ name: `${sect.name} 외문 제자`, hp: 58, atk: 13, def: 5 }, gs, 0.9),
-        scaleFighter({ name: `${sect.name} 내문 제자`, hp: 72, atk: 16, def: 7 }, gs, 0.95),
-        scaleFighter({ name: `${sect.name} 호법`, hp: 92, atk: 19, def: 9 }, gs, 1),
-        scaleFighter({ name: `${sect.name} 장로`, hp: 112, atk: 21, def: 11 }, gs, 1.05),
-        bossFighter(sect, gs),
-    ];
     return {
-        stages: ladder.slice(ladder.length - stageCount),
-        note: `${stageCount}단계 — 외문부터 ${g.name}까지`,
+        stages: [
+            dojoDirectDisciple(sect, gs),
+            dojoElder(sect, gs),
+            dojoLeader(sect, gs),
+        ],
+        note: '직계제자 → 장로 → 장문인',
     };
 }
 
@@ -477,6 +863,7 @@ function startDojoStage() {
     const num = dojoRun.index + 1;
     const enemy = {
         ...stage,
+        faction: dojoRun.sect.faction,
         dojoStage: num,
         dojoTotal: total,
     };
@@ -519,6 +906,13 @@ export function challengeDojo(sectId) {
     const sect = getSect(sectId);
     const gs = state.gameState;
     if (!sect || dojoRun) return;
+
+    const dojoCheck = canChallengeDojo(sectId, gs);
+    if (!dojoCheck.ok) {
+        state.addLog(`🏯 ${sect.name}: "감히 도장을 깨려 드느냐. 실력을 더 쌓고 오라." (${dojoCheck.reason})`);
+        ui.updateAllUI();
+        return;
+    }
 
     const plan = buildDojoPlan(sect, gs.fame, gs.level);
     const pen = getDojoPenalties(sect);
@@ -571,6 +965,7 @@ export function trainAtSect(sectId) {
         }
     }
     gs.day += t.day || 1;
+
     const aff = modifyAffinity(sectId, t.affinity || 2);
     state.gainExp(15);
     state.addLog(`🧘 ${sect.name}에서 ${t.day}일 수련. 우호 +${t.affinity} (${getAffinityLabel(aff).label})`);
@@ -579,6 +974,7 @@ export function trainAtSect(sectId) {
 }
 
 export function openSectPanel(sectId) {
+    quests.onVisitSect(sectId);
     state.gameState.placeUI = { view: 'sect', sectId };
     ui.updateAllUI();
 }

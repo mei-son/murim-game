@@ -1,6 +1,7 @@
 import * as state from './state.js';
 import * as ui from './ui.js';
 import * as encounters from './encounters.js';
+import * as inventory from './inventory.js';
 import { SHOPS, SHOP_STOCK } from './places.js';
 
 export function buyFromShop(shopId, itemIndex) {
@@ -19,7 +20,9 @@ export function buyFromShop(shopId, itemIndex) {
 
     if (item.item) {
         if (encounters.addItem(item.item)) {
-            state.addLog(`${SHOPS[shopId]?.icon || '🏪'} ${item.item} 구입 (${item.gold}냥)`);
+            const def = inventory.getItemDef(item.item);
+            const note = def?.type === 'gear' ? ' — 인벤토리에서 장착' : '';
+            state.addLog(`${SHOPS[shopId]?.icon || '🏪'} ${item.item} 구입 (${item.gold}냥)${note}`);
         } else {
             state.modifyStats({ gold: gs.gold + item.gold });
             state.addLog('이미 갖고 있는 장비다.');

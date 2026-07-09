@@ -4,14 +4,24 @@ import * as events from './events.js';
 import * as ui from './ui.js';
 import * as battle from './battle.js';
 import * as encounters from './encounters.js';
+import * as sects from './sects.js';
+import * as debug from './debug.js';
 
 let pending = null;
 let journeyRunning = false;
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
+export function getTravelDebugState() {
+    return {
+        journeyRunning,
+        travelPending: pending ? { ...pending } : null,
+    };
+}
+
 export function requestTravel(type, targetId) {
     const gs = state.gameState;
+    debug.log('travel', 'requestTravel', { type, targetId, from: type === 'local' ? gs.currentLocation : gs.currentArea, journeyRunning });
 
     if (type === 'area') {
         if (!map.canTravelArea(gs.currentRegion, gs.currentArea, targetId)) {
@@ -66,8 +76,17 @@ export function cancelTravel() {
 }
 
 export function confirmTravel() {
-    if (!pending || journeyRunning) return;
+    if (journeyRunning) {
+        debug.log('travel', 'confirmTravel blocked — journeyRunning', getTravelDebugState());
+        ui.mapToast('이동이 아직 진행 중입니다. 전투 결과를 확인하거나 여정이 끝날 때까지 기다려 주세요.');
+        return;
+    }
+    if (!pending) {
+        debug.log('travel', 'confirmTravel blocked — no pending trip');
+        return;
+    }
     const trip = { ...pending };
+    debug.log('travel', 'confirmTravel → startJourney', trip);
     cancelTravel();
     startJourney(trip);
 }
@@ -76,11 +95,13 @@ async function startJourney(trip) {
     journeyRunning = true;
     const { type, targetId, days, from } = trip;
     const gs = state.gameState;
+    debug.log('travel', 'startJourney', { trip, day: gs.day, area: gs.currentArea });
     showTravelLoading(from, targetId, days);
     let aborted = false;
     let encounterCount = 0;
 
-    for (let d = 1; d <= days; d++) {
+    try {
+        for (let d = 1; d <= days; d++) {
         const progress = (d / days) * 100;
         updateTravelProgress(progress, `${d} / ${days}일째 — 길 위를 걷는 중...`);
         appendTravelLog(`🚶 ${d}일째: ${from}에서 ${targetId} 방향으로 이동 중`);
@@ -92,24 +113,36 @@ async function startJourney(trip) {
             encounterCount++;
             const enemy = roll.enemy;
             const label = enemy.displayName || enemy.name;
-            if (roll.type === 'named') {
-                appendTravelLog(`🌟 <b class="text-amber-300">네임드 조우!</b> ${label}이 나타났다!`);
-            } else {
-                appendTravelLog(`⚠️ <b class="text-red-400">돌발 조우!</b> ${enemy.name}이 길을 막았다!`);
-            }
-            updateTravelProgress(progress, `⚔️ ${label}과 교전 중...`);
-            await delay(400);
+            let result;
+            debug.log('travel', `day ${d} encounter`, { type: roll.type, enemy: label, autoBattle: gs.autoBattle });
 
-            if (gs.autoBattle) {
-                appendTravelLog(`🤖 자동 전투 진행 중...`);
-            } else {
-                appendTravelLog(`⚔️ 수동 전투! 전투창에서 대응하세요.`);
+            if (roll.type === 'named' && !encounters.shouldForceNamedBattle(gs, enemy)) {
+                appendTravelLog(`🌟 <b class="text-amber-300">네임드 조우!</b> ${label} — 대응을 선택하세요.`);
                 hideTravelLoading();
+                result = await events.awaitNamedEncounterChoice(enemy, 'travel');
+                showTravelLoading(from, targetId, days);
+                updateTravelProgress(progress, `⚔️ ${label}과 교전...`);
+            } else {
+                if (roll.type === 'named') {
+                    appendTravelLog(`🌟 <b class="text-amber-300">네임드 조우!</b> ${label} — ${encounters.getForcedNamedBattleMessage(gs, enemy)}`);
+                } else {
+                    appendTravelLog(`⚠️ <b class="text-red-400">돌발 조우!</b> ${enemy.name}이 길을 막았다!`);
+                }
+                updateTravelProgress(progress, `⚔️ ${label}과 교전 중...`);
+                await delay(400);
+
+                if (gs.autoBattle) {
+                    appendTravelLog(`🤖 자동 전투 진행 중...`);
+                } else {
+                    appendTravelLog(`⚔️ 수동 전투! 전투창에서 대응하세요.`);
+                    hideTravelLoading();
+                }
+
+                result = await battle.handleTravelEncounter(enemy);
+                debug.log('travel', 'handleTravelEncounter resolved', { victory: result?.victory, fled: result?.fled, named: result?.named });
+
+                if (!gs.autoBattle) showTravelLoading(from, targetId, days);
             }
-
-            const result = await battle.handleTravelEncounter(enemy);
-
-            if (!gs.autoBattle) showTravelLoading(from, targetId, days);
 
             if (result.log) {
                 for (const line of result.log) {
@@ -118,8 +151,20 @@ async function startJourney(trip) {
                 }
             }
 
-            if (result.victory) {
-                const mode = gs.autoBattle ? `자동 ${result.turns}턴` : '수동';
+            if (result.vanished) {
+                appendTravelLog(`🌫️ <b class="text-zinc-400">${label}</b>이 묘연하게 사라졌다.`);
+            } else if (result.peaceful) {
+                appendTravelLog(`🤝 <b class="text-cyan-300">${label}</b>과 사사로 겨루었다.`);
+            } else if (result.refused || result.talked) {
+                appendTravelLog(`💬 ${label} — 대화만 나누고 헤어졌다.`);
+            } else if (result.spar) {
+                if (result.victory) {
+                    appendTravelLog(`⚔️ <b class="text-cyan-300">${label}</b>과 비무에서 승리!`);
+                } else {
+                    appendTravelLog(`⚔️ ${label}과의 비무에서 밀렸다. 여정은 계속된다.`);
+                }
+            } else if (result.victory) {
+                const mode = gs.autoBattle ? `자동 ${result.turns || '?'}턴` : '수동';
                 if (result.named) {
                     appendTravelLog(`🏆 <b class="text-amber-400">${label}</b> 격파! 명성 대폭 상승 (${mode})`);
                 } else {
@@ -130,14 +175,11 @@ async function startJourney(trip) {
                 }
             } else if (result.fled) {
                 appendTravelLog(`🏃 ${label}(을)를 피해 도망쳤다.`);
-            } else {
+            } else if (!result.spar) {
                 appendTravelLog('💀 패배! 여정이 중단되었다.');
                 aborted = true;
                 state.modifyStats({ hp: Math.max(1, Math.floor(gs.maxHp * 0.25)) });
                 state.addLog(`이동 중 ${label}에게 패배하여 후퇴했다.`);
-                hideTravelLoading();
-                journeyRunning = false;
-                ui.updateAllUI();
                 return;
             }
             await delay(350);
@@ -147,6 +189,7 @@ async function startJourney(trip) {
     }
 
     if (!aborted) {
+        sects.onDayAdvanced(gs, 'travel');
         events.applyTravelDestination(type, targetId);
         updateTravelProgress(100, `📍 ${targetId} 도착!`);
         appendTravelLog(`🎉 <b class="text-amber-400">${targetId}</b>(에) 무사히 도착 (제 ${gs.day}일)`);
@@ -162,10 +205,15 @@ async function startJourney(trip) {
         }
         await delay(900);
     }
-
-    hideTravelLoading();
-    journeyRunning = false;
-    ui.updateAllUI();
+    } catch (err) {
+        debug.error('travel', 'startJourney failed', err);
+        state.addLog('이동 중 문제가 발생해 여정이 중단되었다.');
+    } finally {
+        debug.log('travel', 'startJourney finally', { aborted, encounterCount, journeyRunning: false });
+        hideTravelLoading();
+        journeyRunning = false;
+        ui.updateAllUI();
+    }
 }
 
 function showTravelLoading(from, to, days) {
