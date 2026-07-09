@@ -6,8 +6,28 @@ import * as realm from './realm.js';
 import * as quests from './quests.js';
 import * as martial from './martial.js';
 import * as encounters from './encounters.js';
+import * as enlightenment from './enlightenment.js';
+import * as stamina from './stamina.js';
 
-export const SECT_JOIN_AFFINITY = 50;
+/** 문파 교분 단계 — 높은 min 우선 매칭 */
+export const AFFINITY_TIERS = [
+    { min: 90, label: '절우', color: 'text-rose-300' },
+    { min: 75, label: '맹우', color: 'text-amber-300' },
+    { min: 55, label: '신뢰', color: 'text-amber-400' },
+    { min: 35, label: '우호', color: 'text-green-400' },
+    { min: 20, label: '친분', color: 'text-emerald-400' },
+    { min: 8, label: '면식', color: 'text-cyan-400' },
+    { min: 1, label: '미지', color: 'text-slate-400' },
+    { min: 0, label: '중립', color: 'text-zinc-400' },
+    { min: -9, label: '경계', color: 'text-zinc-500' },
+    { min: -29, label: '냉담', color: 'text-zinc-600' },
+    { min: -50, label: '적대', color: 'text-red-400' },
+];
+
+/** 입문 — 신뢰 이상 */
+export const SECT_JOIN_AFFINITY = 55;
+/** 사파 성향이 정파에 입문할 때 추가 요구 */
+export const SECT_EVIL_JOIN_AFFINITY = 78;
 
 /** 문파별 입문 권유 보상 — 자진 입문에는 미적용 */
 const SECT_JOIN_PACKAGES = {
@@ -43,7 +63,10 @@ const SECT_JOIN_PACKAGES = {
         uniform: { name: '사파망토', icon: '🗡️', desc: '사파 무인 무복' },
     },
 };
-export const SECT_LEADER_AFFINITY = 85;
+/** 문파장 승격 — 절우 이상 */
+export const SECT_LEADER_AFFINITY = 90;
+/** 초대 숙박 개방 교분 (본문·분파·속가) */
+export const SECT_LODGE_AFFINITY_NEED = { 본문: 22, 분파: 38, 속가: 52 };
 export const SECT_LEADER_MIN_LEVEL = 28;
 export const SECT_LEADER_MIN_REALM = 4;
 export const GRAND_MASTER_LEVEL = 55;
@@ -53,6 +76,10 @@ export const SPAR_REJECT_GAP = 2;
 
 /** 대련·견식 횟수 주기 (게임 내 일수) */
 export const SPAR_CYCLE_DAYS = 10;
+
+/** 견식 보상 — 우호·경험치는 미량, 깨달음 확률은 enlightenment.RANDOM_CHANCE.observe 유지 */
+const OBSERVE_AFFINITY = { 본문: 1, 분파: 1, 속가: 2 };
+const OBSERVE_EXP_BASE = 2;
 export const OBSERVE_CYCLE_DAYS = 7;
 
 function getSparCycleLimit(sect) {
@@ -132,7 +159,7 @@ export function formatObserveHint(access) {
         }
         return '견식 불가';
     }
-    return `1일 소모 · 우호 상승 · ${access.cycleDays}일간 ${access.used}/${access.cycleLimit}회`;
+    return `1일 소모 · 교분·경험치 미량 · ${access.cycleDays}일간 ${access.used}/${access.cycleLimit}회`;
 }
 
 /** 대련 가능 여부 — UI·로직 공통 */
@@ -211,7 +238,7 @@ function findBestSectAffiliation(gs) {
         const sect = getSect(sectId);
         if (!sect) continue;
         if (sect.faction === '사파' && disp.short !== '사') continue;
-        if (sect.faction === '정파' && disp.short === '사' && value < 70) continue;
+        if (sect.faction === '정파' && disp.short === '사' && value < SECT_EVIL_JOIN_AFFINITY) continue;
         if (!best || value > best.affinity) {
             best = { sectId, sect, affinity: value, family: getSectFamilyName(sect) };
         }
@@ -268,7 +295,7 @@ function memberTitleForTier(tier) {
 function passesSectJoinDisposition(sect, aff, gs = state.gameState) {
     const disp = hero.getDisposition(gs);
     if (sect.faction === '사파' && disp.short !== '사') return false;
-    if (sect.faction === '정파' && disp.short === '사' && aff < 70) return false;
+    if (sect.faction === '정파' && disp.short === '사' && aff < SECT_EVIL_JOIN_AFFINITY) return false;
     return true;
 }
 
@@ -424,7 +451,7 @@ export function declineSectJoin(sectId) {
     }
     markSectJoinOffered(sectId, 'declined', gs);
     if (sect) {
-        state.addLog(`${sect.name}의 입문 권유를 사양했다. 우호가 유지되면 나중에 자진 입문할 수 있다.`);
+        state.addLog(`${sect.name}의 입문 권유를 사양했다. 교분이 유지되면 나중에 자진 입문할 수 있다.`);
     }
     gs.placeUI = { view: 'sect', sectId };
     ui.updateAllUI();
@@ -653,16 +680,28 @@ export function spendAffinity(sectId, amount, gs = state.gameState) {
     return { next, spent };
 }
 
-export function getAffinityLabel(value) {
-    if (value >= 60) return { label: '맹우', color: 'text-amber-300' };
-    if (value >= 25) return { label: '우호', color: 'text-green-400' };
-    if (value >= 5) return { label: '호의', color: 'text-blue-400' };
-    if (value >= -5) return { label: '중립', color: 'text-zinc-400' };
-    if (value >= -25) return { label: '냉담', color: 'text-zinc-500' };
-    return { label: '적대', color: 'text-red-400' };
+export function getAffinityTier(value) {
+    for (const tier of AFFINITY_TIERS) {
+        if (value >= tier.min) return tier;
+    }
+    return AFFINITY_TIERS[AFFINITY_TIERS.length - 1];
 }
 
-/** 견식 — 우호 소폭 상승, 주기별 횟수 제한 */
+export function getAffinityLabel(value) {
+    const tier = getAffinityTier(value);
+    return { label: tier.label, color: tier.color };
+}
+
+export function formatAffinityRequirement(threshold) {
+    const tier = getAffinityTier(threshold);
+    return `${tier.label} (${threshold}+)`;
+}
+
+export function getSectLodgingNeed(tier) {
+    return SECT_LODGE_AFFINITY_NEED[tier] ?? SECT_LODGE_AFFINITY_NEED['분파'];
+}
+
+/** 견식 — 우호·경험치 미량, 깨달음 확률 유지, 주기별 횟수 제한 */
 export function observeSect(sectId) {
     const sect = getSect(sectId);
     if (!sect) return;
@@ -678,13 +717,25 @@ export function observeSect(sectId) {
         return;
     }
 
+    const stSpend = stamina.trySpendAction('sectObserve', gs);
+    if (!stSpend.ok) {
+        state.addLog(stamina.staminaBlockedMessage('견식', stSpend.cost, gs));
+        gs.placeUI = { view: 'sect', sectId };
+        ui.updateAllUI();
+        return;
+    }
+
     recordSectActivity(gs, 'sectObserveLog', sectId, OBSERVE_CYCLE_DAYS);
     const usedNow = getSectActivityMeta(gs, 'sectObserveLog', sectId, OBSERVE_CYCLE_DAYS).used;
     gs.day += 1;
-    const gain = sect.tier === '본문' ? 4 : sect.tier === '분파' ? 5 : 6;
+    stamina.onDayAdvanced(gs);
+    const gain = OBSERVE_AFFINITY[sect.tier] ?? 1;
+    const expGain = OBSERVE_EXP_BASE + Math.floor(gs.level / 8);
     const aff = modifyAffinity(sectId, gain);
-    state.gainExp(8 + gs.level);
-    state.addLog(`🙏 ${sect.name}에서 견식. 우호도 +${gain} (${getAffinityLabel(aff).label}) · ${OBSERVE_CYCLE_DAYS}일간 ${usedNow}/${access.cycleLimit}회`);
+    state.gainExp(expGain);
+    state.addLog(`🙏 ${sect.name}에서 견식. 교분 +${gain}, EXP +${expGain} → ${getAffinityLabel(aff).label} (${aff}) · ${OBSERVE_CYCLE_DAYS}일간 ${usedNow}/${access.cycleLimit}회`);
+    const enlight = enlightenment.tryEnlightenment('observe');
+    if (enlight) ui.showEnlightenmentToast(enlight);
     gs.placeUI = { view: 'sect', sectId };
     ui.updateAllUI();
 }
@@ -710,14 +761,23 @@ export function requestSparring(sectId) {
     }
 
     const paid = !access.free;
+    if (paid && gs.gold < access.fee) {
+        state.addLog(`⚔️ ${sect.name}: "대련은 ${access.fee}냥을 내야 한다." (보유 ${gs.gold}냥)`);
+        gs.placeUI = { view: 'sect', sectId };
+        ui.updateAllUI();
+        return;
+    }
+
+    const stSpend = stamina.trySpendAction('sectSpar', gs);
+    if (!stSpend.ok) {
+        state.addLog(stamina.staminaBlockedMessage('대련', stSpend.cost, gs));
+        gs.placeUI = { view: 'sect', sectId };
+        ui.updateAllUI();
+        return;
+    }
+
     if (paid) {
-        const cur = state.gameState;
-        if (cur.gold < access.fee) {
-            state.addLog(`⚔️ ${sect.name}: "대련은 ${access.fee}냥을 내야 한다." (보유 ${cur.gold}냥)`);
-            ui.updateAllUI();
-            return;
-        }
-        state.modifyStats({ gold: cur.gold - access.fee });
+        state.modifyStats({ gold: gs.gold - access.fee });
         state.addLog(`${sect.name}에 대련비 ${access.fee}냥을 냈다.`);
     }
 
@@ -727,6 +787,7 @@ export function requestSparring(sectId) {
         cycleCount: sparMeta.used,
         lifetimeCount: lifetime,
     });
+
     recordSectActivity(gs, 'sectSparLog', sectId, SPAR_CYCLE_DAYS);
 
     battle.startBattleFromEnemy(enemy, 'spar', (won) => {
@@ -738,7 +799,7 @@ export function requestSparring(sectId) {
             state.gainExp(12 + g.level * 2);
             if (fameGain) state.applyHyeophaengChange(fameGain);
             quests.onSparVictory(sectId);
-            state.addLog(`⚔️ ${sect.name} 대련 승! 우호 +${affGain}${fameGain ? `, 협행 +${fameGain}` : ''} (${getAffinityLabel(aff).label})`);
+            state.addLog(`⚔️ ${sect.name} 대련 승! 교분 +${affGain}${fameGain ? `, 협행 +${fameGain}` : ''} → ${getAffinityLabel(aff).label} (${aff})`);
             if (canInviteToSect(sectId, state.gameState)) {
                 offerSectJoin(sectId);
                 return;
@@ -746,7 +807,7 @@ export function requestSparring(sectId) {
         } else {
             const aff = modifyAffinity(sectId, -1);
             state.gainExp(5);
-            state.addLog(`⚔️ ${sect.name} 대련 패배. 우호 -1 (미미) (${getAffinityLabel(aff).label})`);
+            state.addLog(`⚔️ ${sect.name} 대련 패배. 교분 -1 (미미) → ${getAffinityLabel(aff).label} (${aff})`);
         }
         openSectPanel(sectId);
     });
@@ -851,7 +912,7 @@ function finishDojoRunFailed() {
         fame: Math.max(0, cur.fame - fameLoss),
         notoriety: cur.notoriety + (sect.faction === '정파' ? 3 : 1),
     });
-    state.addLog(`🏯 ${sect.name} 도장깨기 ${index + 1}/${stages.length}단계에서 패배. 명성 -${fameLoss}, 우호 -${affLoss} (${getAffinityLabel(newAff).label})`);
+    state.addLog(`🏯 ${sect.name} 도장깨기 ${index + 1}/${stages.length}단계에서 패배. 명성 -${fameLoss}, 교분 -${affLoss} → ${getAffinityLabel(newAff).label} (${newAff})`);
     closeSectPanel();
     ui.updateAllUI();
 }
@@ -895,7 +956,7 @@ function startDojoStage() {
             notoriety: cur.notoriety + (sect.faction === '정파' ? 3 : 1),
         });
         state.gainExp(20 + cur.level * 2 + (sect.tier === '본문' ? 15 : 5));
-        state.addLog(`🏯 ${sect.name} ${totalStages}단계 도장 돌파! 문파 원한 — 명성 -${fameLoss}, 우호 -${affLoss} (${getAffinityLabel(newAff).label})`);
+        state.addLog(`🏯 ${sect.name} ${totalStages}단계 도장 돌파! 문파 원한 — 명성 -${fameLoss}, 교분 -${affLoss} → ${getAffinityLabel(newAff).label} (${newAff})`);
         closeSectPanel();
         ui.updateAllUI();
     });
@@ -910,6 +971,13 @@ export function challengeDojo(sectId) {
     const dojoCheck = canChallengeDojo(sectId, gs);
     if (!dojoCheck.ok) {
         state.addLog(`🏯 ${sect.name}: "감히 도장을 깨려 드느냐. 실력을 더 쌓고 오라." (${dojoCheck.reason})`);
+        ui.updateAllUI();
+        return;
+    }
+
+    const stSpend = stamina.trySpendAction('sectDojo', gs);
+    if (!stSpend.ok) {
+        state.addLog(stamina.staminaBlockedMessage('도장깨기', stSpend.cost, gs));
         ui.updateAllUI();
         return;
     }
@@ -951,6 +1019,12 @@ export function trainAtSect(sectId) {
         ui.updateAllUI();
         return;
     }
+    const stSpend = stamina.trySpendAction('sectTrain', gs);
+    if (!stSpend.ok) {
+        state.addLog(stamina.staminaBlockedMessage('수련', stSpend.cost, gs));
+        ui.updateAllUI();
+        return;
+    }
 
     state.modifyStats({
         gold: gs.gold - t.gold,
@@ -965,10 +1039,11 @@ export function trainAtSect(sectId) {
         }
     }
     gs.day += t.day || 1;
+    stamina.onDayAdvanced(gs);
 
     const aff = modifyAffinity(sectId, t.affinity || 2);
     state.gainExp(15);
-    state.addLog(`🧘 ${sect.name}에서 ${t.day}일 수련. 우호 +${t.affinity} (${getAffinityLabel(aff).label})`);
+    state.addLog(`🧘 ${sect.name}에서 ${t.day}일 수련. 교분 +${t.affinity} → ${getAffinityLabel(aff).label} (${aff})`);
     closeSectPanel();
     ui.updateAllUI();
 }

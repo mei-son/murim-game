@@ -10,6 +10,8 @@ export let gameState = {
     aekhaeng: 0,
     hp: 120,
     maxHp: 120,
+    stamina: 100,
+    maxStamina: 100,
     naegong: 0,
     maxNaegong: 0,
     naegongUnlocked: false,
@@ -39,11 +41,17 @@ export let gameState = {
     autoBattle: false,
     inventory: [],
     equipped: { weapon: null, armor: null },
+    gearDurability: {},
     defeatedNamed: [],
     defeatedHeukSaryong: false,
     defeatedHyeolmaGeom: false,
     defeatedCheongpung: false,
     defeatedDoksaGungju: false,
+    defeatedBanditChiefGeomgak: false,
+    defeatedForestRogueChief: false,
+    defeatedMountainBanditLord: false,
+    /** 숲·산 조우 진행 { 'area:loc': { weakKills, normalKills, strongKills, encounters, cycleStartDay } } */
+    wildernessThreat: {},
     sectAffinity: {},
     /** 문파별 일일 대련 횟수 { [sectId]: { day, count } } */
     sectSparLog: {},
@@ -60,7 +68,7 @@ export let gameState = {
         masked: true,
     },
     enlightenment: {
-        counts: { battle: 0, spar: 0, dojo: 0, gather: 0 },
+        counts: { battle: 0, spar: 0, dojo: 0, gather: 0, observe: 0 },
         total: 0,
     },
     intelJournal: [],
@@ -79,6 +87,7 @@ export let gameState = {
     martialArts: {
         learned: [
             { id: 'samjae_sword', level: 1, exp: 0 },
+            { id: 'gwongak_basic', level: 1, exp: 0 },
             { id: 'ohaeng_step', level: 1, exp: 0 },
         ],
     },
@@ -208,6 +217,9 @@ export function addLog(text) {
 export function advanceDays(days, destination) {
     if (days <= 0) return;
     gameState.day += days;
+    import('./stamina.js').then(s => {
+        for (let i = 0; i < days; i++) s.onDayAdvanced(gameState);
+    });
     import('./sects.js').then(s => s.onDayAdvanced(gameState, 'travel'));
     addLog(`🚶 ${days}일 소요 — ${destination}(에) 도착 (제 ${gameState.day}일)`);
     if (days >= 3) {

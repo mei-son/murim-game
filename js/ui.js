@@ -11,6 +11,8 @@ import * as realm from './realm.js';
 import * as enlightenment from './enlightenment.js';
 import * as intel from './intel.js';
 import * as inventory from './inventory.js';
+import * as encounters from './encounters.js';
+import * as stamina from './stamina.js';
 
 let infoTab = 'character';
 
@@ -27,6 +29,7 @@ export function closeInventoryPopover() {
 const INFO_MODAL_SIZE_KEY = 'murim-info-modal-size';
 
 export function initUI() {
+    stamina.initStamina(state.gameState);
     document.addEventListener('click', (e) => {
         if (!inventoryPopoverOpen) return;
         const wrap = document.getElementById('header-inventory-btn')?.parentElement;
@@ -97,6 +100,7 @@ function initInfoModalResize() {
 }
 
 export function updateAllUI() {
+    stamina.initStamina(state.gameState);
     renderToolbar();
     renderStats();
     renderMap();
@@ -141,11 +145,14 @@ export function renderToolbar() {
         const slotRows = Object.entries(inventory.GEAR_SLOTS).map(([slot, label]) => {
             const id = gs.equipped?.[slot];
             const item = id ? inventory.getItemDef(id) : null;
+            const durNote = slot === 'weapon' && item
+                ? ` <span class="text-zinc-500 text-[0.65rem]">(${inventory.formatWeaponDurability(gs)})</span>`
+                : '';
             return `
                 <div class="inv-pop-item inv-pop-slot">
                     <span class="text-zinc-500 text-xs">${label}</span>
                     ${item ? `
-                    <span>${item.icon} ${item.name}</span>
+                    <span>${item.icon} ${item.name}${durNote}</span>
                     <button onclick="window.unequipItem('${slot}')"
                         class="px-2 py-0.5 text-xs bg-zinc-700 hover:bg-zinc-600 rounded choice-btn">해제</button>`
                     : '<span class="text-zinc-600 text-xs">비어 있음</span>'}
@@ -197,6 +204,7 @@ function renderStats() {
         { label: '악명', value: gs.notoriety, icon: 'fa-skull', color: 'text-red-400' },
         { label: '협행', value: gs.hyeophaeng, icon: 'fa-hand-holding-heart', color: 'text-blue-400' },
         { label: '체력', value: `${gs.hp}/${gs.maxHp}`, icon: 'fa-heart', color: 'text-rose-400' },
+        { label: '스테미나', value: stamina.formatStamina(gs), icon: 'fa-bolt', color: 'text-lime-400' },
         { label: '내공', value: martial.isNaegongUnlocked(gs) ? `${gs.naegong}/${gs.maxNaegong}` : '내공 미타동', icon: 'fa-fire', color: 'text-orange-400' },
     ];
     bar.innerHTML = cards.map(c => `
@@ -396,16 +404,21 @@ function buildTravelList(ctx, gs) {
 
     return `
         <div class="text-xs text-zinc-500 px-2 py-1 border-b border-zinc-700">이동 가능</div>
-        ${allDests.map(d => `
+        ${allDests.map(d => {
+            const spCost = stamina.getTravelStaminaCost(d.days, ctx.travelType === 'local');
+            const canGo = stamina.canAfford(spCost, gs);
+            return `
             <button onclick="window.requestTravel('${ctx.travelType}','${d.id}')"
-                class="travel-item choice-btn w-full text-left px-3 py-2.5 border-b border-zinc-800 hover:bg-zinc-800/60">
+                class="travel-item choice-btn w-full text-left px-3 py-2.5 border-b border-zinc-800 hover:bg-zinc-800/60
+                    ${canGo ? '' : 'opacity-50'}">
                 <div class="flex items-center gap-2">
                     <span class="text-lg">${d.icon}</span>
                     <span class="flex-1 text-sm font-medium">${d.label || '❓'}</span>
                     <span class="travel-days-badge">${state.formatDayLabel(d.days)}</span>
+                    <span class="text-[0.65rem] ${canGo ? 'text-lime-400/80' : 'text-red-400/90'}">${spCost}SP</span>
                 </div>
-            </button>
-        `).join('')}
+            </button>`;
+        }).join('')}
     `;
 }
 
@@ -485,6 +498,16 @@ export function renderMainPanel() {
     const heroDisp = hero.getHeroDisplay(gs);
     const evRate = martial.getEvasionRate(gs);
     const intelRate = intel.getIntelSuccessPercent(gs);
+    const intelAccess = places.canGatherIntel(gs.currentLocation, gs.currentArea);
+    const exploreTerrain = map.getSpotTile(gs.currentLocation, gs.currentArea) || 'grass';
+    const wildAccess = encounters.supportsWildernessEncounters(exploreTerrain)
+        ? encounters.getWildernessEncounterAccess(gs.currentArea, gs.currentLocation, exploreTerrain, gs)
+        : null;
+    const exploreWildHint = wildAccess
+        ? (wildAccess.ok
+            ? `산적·도적 ${Math.round((encounters.getWildernessTerrainConfig(exploreTerrain)?.explore || 0) * 100)}% · ${wildAccess.used}/${wildAccess.limit}회`
+            : `조우 한도 (${wildAccess.used}/${wildAccess.limit} · ${wildAccess.daysUntilReset}일 후)`)
+        : '';
     panel.innerHTML = `
         <div class="flex items-center gap-4 mb-6">
             ${renderHeroAvatar(heroDisp)}
@@ -500,20 +523,26 @@ export function renderMainPanel() {
                     <span class="text-zinc-600">·</span>
                     <span class="${heroDisp.realm.color} font-medium">【${heroDisp.realmName}】</span>
                 </p>
-                <p class="text-zinc-400 mt-1">Lv.${gs.level} · 공격 ${gs.atk} · 방어 ${gs.def} · 회피 ${evRate}%</p>
+                <p class="text-zinc-400 mt-1">Lv.${gs.level} · 공격 ${gs.atk} · 방어 ${gs.def} · 회피 ${evRate}% · 스테미나 ${stamina.formatStamina(gs)}</p>
                 <p class="text-zinc-500 text-sm mt-1">${gs.currentRegion}${subLoc} · <span class="text-amber-600">제 ${gs.day}일</span></p>
             </div>
         </div>
         ${renderPlaceHub(gs, meta)}
         <div class="grid grid-cols-3 gap-3 mb-6">
             <button onclick="window.exploreLocation()"
-                class="choice-btn p-4 bg-amber-800/40 hover:bg-amber-700/60 border border-amber-600 rounded-xl font-bold">
+                class="choice-btn p-4 bg-amber-800/40 hover:bg-amber-700/60 border border-amber-600 rounded-xl font-bold
+                ${stamina.canAfford(stamina.STAMINA_COST.explore, gs) ? '' : 'opacity-50'}">
                 <i class="fas fa-compass mr-2"></i>주변 탐색
+                <div class="text-xs font-normal text-amber-300/80 mt-1">${stamina.formatCostLabel(stamina.STAMINA_COST.explore)}${exploreWildHint ? ` · ${exploreWildHint}` : ''}</div>
             </button>
             <button onclick="window.gatherIntel()"
-                class="choice-btn p-4 bg-blue-900/40 hover:bg-blue-800/60 border border-blue-600 rounded-xl font-bold">
+                class="choice-btn p-4 bg-blue-900/40 hover:bg-blue-800/60 border border-blue-600 rounded-xl font-bold
+                ${intelAccess.ok && stamina.canAfford(stamina.STAMINA_COST.gather, gs) ? '' : 'opacity-50'}
+                ${intelAccess.ok ? '' : 'cursor-not-allowed'}">
                 <i class="fas fa-ear-listen mr-2"></i>정보 수집
-                <div class="text-xs font-normal text-blue-300/80 mt-1">성공 ~${intelRate}% · ${intel.getIntelStayStatusText(gs)}</div>
+                <div class="text-xs font-normal ${intelAccess.ok ? 'text-blue-300/80' : 'text-zinc-500'} mt-1">${intelAccess.ok
+                    ? `${stamina.formatCostLabel(stamina.STAMINA_COST.gather)} · 성공 ~${intelRate}% · ${intel.getIntelStayStatusText(gs)}`
+                    : intelAccess.shortHint}</div>
             </button>
             <button onclick="window.openRestMenu()"
                 class="choice-btn p-4 bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-600 rounded-xl font-bold">
@@ -693,7 +722,7 @@ function renderPlaceSubView(gs) {
                     <div class="text-3xl">${s.icon}</div>
                     <div>
                         <h3 class="text-xl font-bold text-amber-300">입문 권유</h3>
-                        <p class="text-sm text-zinc-500">${s.name} · 우호 <span class="${affLabel.color} font-bold">${affLabel.label} (${aff})</span></p>
+                        <p class="text-sm text-zinc-500">${s.name} · 교분 <span class="${affLabel.color} font-bold">${affLabel.label} (${aff})</span></p>
                     </div>
                 </div>
                 <p class="text-zinc-300 mb-4 leading-relaxed">
@@ -710,7 +739,7 @@ function renderPlaceSubView(gs) {
                     <button onclick="window.sectDeclineJoin('${sectId}')"
                         class="choice-btn w-full text-left p-4 rounded-xl border border-zinc-600 bg-zinc-800/40 hover:bg-zinc-700/50">
                         <b>사양한다</b>
-                        <div class="text-xs text-zinc-500 mt-1">우호 유지 · 권유는 다시 없음 · 이후 자진 입문 가능(보상 없음)</div>
+                        <div class="text-xs text-zinc-500 mt-1">교분 유지 · 권유는 다시 없음 · 이후 자진 입문 가능(보상 없음)</div>
                     </button>
                 </div>
             </div>
@@ -777,39 +806,41 @@ function renderSectPanel(sectId) {
                 <div class="sd-placeholder text-3xl">${s.icon}</div>
                 <div>
                     <h3 class="text-xl font-bold text-amber-300">${s.name}</h3>
-                    <p class="text-sm text-zinc-500">${s.tier} · ${s.faction} · 우호 <span class="${affLabel.color} font-bold">${affLabel.label} (${aff})</span></p>
+                    <p class="text-sm text-zinc-500">${s.tier} · ${s.faction} · 교분 <span class="${affLabel.color} font-bold">${affLabel.label} (${aff})</span></p>
                 </div>
             </div>
             <p class="text-zinc-300 mb-6">${s.desc}</p>
             <div class="space-y-3">
                 <button onclick="window.sectSpar('${sectId}')" ${sparAccess.ok ? '' : 'disabled'}
                     class="choice-btn w-full text-left p-4 rounded-xl border border-orange-600 bg-orange-900/30 hover:bg-orange-800/50
-                    ${sparAccess.ok ? '' : 'opacity-40 cursor-not-allowed hover:bg-orange-900/30'}">
+                    ${sparAccess.ok && stamina.canAfford(stamina.STAMINA_COST.sectSpar, gs) ? '' : 'opacity-40 cursor-not-allowed hover:bg-orange-900/30'}">
                     <b>⚔️ 대련</b> — ${sparHint}
-                    <div class="text-xs text-orange-300/70 mt-1">우호 대결 · 승리 시 명성·우호↑ · 패배해도 우호 하락 미미 · ${sects.SPAR_CYCLE_DAYS}일 주기 횟수 제한</div>
+                    <div class="text-xs text-orange-300/70 mt-1">${stamina.formatCostLabel(stamina.STAMINA_COST.sectSpar)} · 교분 대결 · 승리 시 협행·교분↑ · ${sects.SPAR_CYCLE_DAYS}일 주기 횟수 제한</div>
                 </button>
                 <button onclick="window.sectObserve('${sectId}')" ${observeAccess.ok ? '' : 'disabled'}
                     class="choice-btn w-full text-left p-4 rounded-xl border border-blue-600 bg-blue-900/30
-                    ${observeAccess.ok ? 'hover:bg-blue-800/50' : 'opacity-40 cursor-not-allowed pointer-events-none hover:bg-blue-900/30'}">
+                    ${observeAccess.ok && stamina.canAfford(stamina.STAMINA_COST.sectObserve, gs) ? 'hover:bg-blue-800/50' : 'opacity-40 cursor-not-allowed pointer-events-none hover:bg-blue-900/30'}">
                     <b>🙏 견식</b> — ${observeHint}
-                    <div class="text-xs text-blue-300/70 mt-1">1일 소모 · 우호 상승·경험치 · ${sects.OBSERVE_CYCLE_DAYS}일 주기 횟수 제한</div>
+                    <div class="text-xs text-blue-300/70 mt-1">${stamina.formatCostLabel(stamina.STAMINA_COST.sectObserve)} · 1일 소모 · 교분·경험치 미량 · ${sects.OBSERVE_CYCLE_DAYS}일 주기 횟수 제한</div>
                 </button>
                 <button onclick="window.sectChallenge('${sectId}')" ${dojoCheck.ok ? '' : 'disabled'}
                     class="choice-btn w-full text-left p-4 rounded-xl border border-red-600 bg-red-900/30 hover:bg-red-800/50
-                    ${dojoCheck.ok ? '' : 'opacity-40 cursor-not-allowed hover:bg-red-900/30'}">
+                    ${dojoCheck.ok && stamina.canAfford(stamina.STAMINA_COST.sectDojo, gs) ? '' : 'opacity-40 cursor-not-allowed hover:bg-red-900/30'}">
                     <b>🏯 도장깨기</b> — ${dojoHint}
-                    <div class="text-xs text-red-300/70 mt-1">3단계 (${dojoInfo?.note ?? '직계제자 → 장로 → 장문인'}) · 문파 모욕 · 완료·패배 시 명성·우호↓</div>
+                    <div class="text-xs text-red-300/70 mt-1">${stamina.formatCostLabel(stamina.STAMINA_COST.sectDojo)} · 3단계 (${dojoInfo?.note ?? '직계제자 → 장로 → 장문인'}) · 문파 모욕 · 명성·교분↓</div>
                     ${dojoStages ? `<div class="text-xs text-zinc-600 mt-1 leading-relaxed">${dojoStages}</div>` : ''}
                 </button>
                 ${s.canTrain ? `
                 <button onclick="window.sectTrain('${sectId}')"
-                    class="choice-btn w-full text-left p-4 rounded-xl border border-emerald-600 bg-emerald-900/30 hover:bg-emerald-800/50">
+                    class="choice-btn w-full text-left p-4 rounded-xl border border-emerald-600 bg-emerald-900/30 hover:bg-emerald-800/50
+                    ${stamina.canAfford(stamina.STAMINA_COST.sectTrain, gs) ? '' : 'opacity-40'}">
                     <b>🧘 수련</b> — ${s.train.gold}냥·내공 ${s.train.naegong}, ${s.train.day}일 (분파·속가)
+                    <div class="text-xs text-emerald-300/70 mt-1">${stamina.formatCostLabel(stamina.STAMINA_COST.sectTrain)}</div>
                 </button>` : ''}
                 ${canLodge ? `
                 <button onclick="window.performRest('sect','${sectId}')"
                     class="choice-btn w-full text-left p-4 rounded-xl border border-amber-600 bg-amber-900/30 hover:bg-amber-800/50">
-                    <b>🏠 초대 숙박</b> — 전폭 회복·경험치 (우호 ${aff}, 이용 시 -${rest.SECT_LODGE_AFFINITY_COST})
+                    <b>🏠 초대 숙박</b> — 전폭 회복·경험치 (교분 ${affLabel.label} ${aff}, 이용 시 -${rest.SECT_LODGE_AFFINITY_COST})
                     <div class="text-xs text-amber-300/70 mt-1">거대 문파 우대 · 회복률 높음</div>
                 </button>` : ''}
                 ${joinOffer === 'pending' ? `
@@ -821,7 +852,7 @@ function renderSectPanel(sectId) {
                 ${canVoluntary ? `
                 <button onclick="window.sectVoluntaryJoin('${sectId}')"
                     class="choice-btn w-full text-left p-4 rounded-xl border border-emerald-700 bg-emerald-950/30 hover:bg-emerald-900/40">
-                    <b>🏯 자진 입문</b> — 우호 ${aff} (필요 ${sects.SECT_JOIN_AFFINITY}+)
+                    <b>🏯 자진 입문</b> — 교분 ${affLabel.label} ${aff} (필요 ${sects.formatAffinityRequirement(sects.SECT_JOIN_AFFINITY)})
                     <div class="text-xs text-emerald-300/70 mt-1">문파 소속만 획득 · 무공 전수·숙련 보상 없음</div>
                 </button>` : ''}
             </div>
@@ -1068,7 +1099,8 @@ function renderSectAffinities(gs) {
     if (!entries.length) return '';
     return `
         <div class="mt-3">
-            <h4 class="text-sm text-zinc-500 mb-2"><i class="fas fa-handshake mr-1"></i>문파 우호도</h4>
+            <h4 class="text-sm text-zinc-500 mb-2"><i class="fas fa-handshake mr-1"></i>문파 교분</h4>
+            <p class="text-[0.65rem] text-zinc-600 mb-2">미지 → 면식 → 친분 → 우호 → 신뢰 → 맹우 → 절우</p>
             <div class="space-y-1 text-sm">
                 ${entries.map(([id, val]) => {
                     const s = sects.getSect(id);

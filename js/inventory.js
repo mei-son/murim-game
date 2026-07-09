@@ -16,6 +16,21 @@ export const GEAR_SLOTS = {
     armor: '방어구',
 };
 
+/** 무기 내구도 — 등급별 최대치·대치 손상량 */
+export const WEAPON_DURABILITY_MAX = {
+    common: 52,
+    fine: 82,
+    rare: 108,
+    kiyeon: 145,
+};
+
+export const WEAPON_CLASH_WEAR = {
+    common: 18,
+    fine: 11,
+    rare: 7,
+    kiyeon: 4,
+};
+
 /** 방어구는 등급이 높을수록 실전 보정이 줄어듦 */
 const ARMOR_EFFECT_MULT = {
     common: 1,
@@ -69,7 +84,69 @@ export const ITEMS = {
 export function initInventory(gs = state.gameState) {
     if (!gs.equipped) gs.equipped = { weapon: null, armor: null };
     if (!gs.inventory) gs.inventory = [];
+    if (!gs.gearDurability) gs.gearDurability = {};
     migrateLegacyInventory(gs);
+    syncWeaponDurability(gs);
+}
+
+function syncWeaponDurability(gs) {
+    const wid = gs.equipped?.weapon;
+    if (!wid) {
+        delete gs.gearDurability.weapon;
+        return;
+    }
+    const def = ITEMS[wid];
+    if (!def || def.slot !== 'weapon') return;
+    if (gs.gearDurability.weapon == null) {
+        gs.gearDurability.weapon = WEAPON_DURABILITY_MAX[def.grade] ?? 50;
+    }
+}
+
+export function getWeaponMaxDurability(grade) {
+    return WEAPON_DURABILITY_MAX[grade] ?? 50;
+}
+
+export function getEquippedWeaponState(gs = state.gameState) {
+    initInventory(gs);
+    const id = gs.equipped?.weapon;
+    if (!id) return { equipped: false, broken: true, unarmed: true };
+    const def = ITEMS[id];
+    if (!def || def.slot !== 'weapon') return { equipped: false, broken: true, unarmed: true };
+    const max = getWeaponMaxDurability(def.grade);
+    const cur = Math.max(0, gs.gearDurability?.weapon ?? max);
+    return {
+        equipped: true,
+        id,
+        def,
+        grade: def.grade,
+        atk: def.atk || 0,
+        durability: cur,
+        max,
+        broken: cur <= 0,
+        unarmed: cur <= 0,
+    };
+}
+
+export function wearEquippedWeapon(gs, amount, grade = null) {
+    initInventory(gs);
+    const w = getEquippedWeaponState(gs);
+    if (!w.equipped || w.broken) {
+        return { worn: 0, before: w.durability, after: w.durability, max: w.max, broken: w.broken, weapon: w };
+    }
+    const g = grade || w.grade;
+    const wear = Math.max(1, Math.floor(amount * ((WEAPON_CLASH_WEAR[g] ?? WEAPON_CLASH_WEAR.common) / WEAPON_CLASH_WEAR.common)));
+    const before = w.durability;
+    gs.gearDurability.weapon = Math.max(0, before - wear);
+    const broken = gs.gearDurability.weapon <= 0;
+    const next = getEquippedWeaponState(gs);
+    return { worn: wear, before, after: next.durability, max: next.max, broken, weapon: next };
+}
+
+export function formatWeaponDurability(gs = state.gameState) {
+    const w = getEquippedWeaponState(gs);
+    if (!w.equipped) return '맨손';
+    if (w.broken) return `${w.def.icon} ${w.def.name} (파손)`;
+    return `${w.def.icon} ${w.def.name} ${w.durability}/${w.max}`;
 }
 
 function migrateLegacyInventory(gs) {
@@ -143,7 +220,11 @@ export function getGearBonuses(gs = state.gameState) {
 export function formatGearEffect(item) {
     if (!item || item.type !== 'gear') return item?.desc || '';
     const parts = [];
-    if (item.slot === 'weapon' && item.atk) parts.push(`공격+${item.atk}`);
+    if (item.slot === 'weapon' && item.atk) {
+        parts.push(`공격+${item.atk}`);
+        const max = getWeaponMaxDurability(item.grade);
+        parts.push(`내구 ${max}`);
+    }
     if (item.slot === 'armor') {
         const def = calcAppliedGearStat(item, 'def');
         const eva = calcAppliedGearStat(item, 'evasion');
@@ -201,6 +282,10 @@ export function equipItem(itemId, gs = state.gameState) {
 
     gs.equipped[slot] = itemId;
     gs.inventory.splice(idx, 1);
+    if (slot === 'weapon') {
+        if (!gs.gearDurability) gs.gearDurability = {};
+        gs.gearDurability.weapon = getWeaponMaxDurability(item.grade);
+    }
     refreshCombatStats(gs);
     state.addLog(`🎒 ${item.icon} ${item.name} 장착 (${GEAR_SLOTS[slot]})`);
     return true;

@@ -87,11 +87,14 @@ export const PLACE_PROFILES = {
     '검각관': { scale: 'pass', shops: [], sects: ['wanderer_camp'] },
     '관문':   { scale: 'pass', parent: '검각관', shops: [], sects: [] },
 
-    '약초원': { scale: 'village', parent: '촉남촌', shops: ['herb'], sects: [] },
+    '약초원': { scale: 'village', parent: '촉남촌', shops: ['herb'], sects: [], terrain: 'forest' },
+    '숲길':   { scale: 'remote', parent: '촉남촌', shops: [], sects: [], terrain: 'forest' },
     '촌입구': { scale: 'village', parent: '촉남촌', shops: [], sects: [] },
     '성도남문': { scale: 'city', parent: '성도부', shops: [], sects: [] },
-    '산길':   { scale: 'remote', parent: '청성산', shops: [], sects: [] },
-    '산적소굴': { scale: 'pass', parent: '검각관', shops: [], sects: [] },
+    '숲속':   { scale: 'remote', parent: '청성산', shops: [], sects: [], terrain: 'forest' },
+    '산길':   { scale: 'remote', parent: '청성산', shops: [], sects: [], terrain: 'mountain' },
+    '산채길': { scale: 'remote', parent: '아미금정', shops: [], sects: [], terrain: 'mountain' },
+    '산적소굴': { scale: 'pass', parent: '검각관', shops: [], sects: [], terrain: 'danger' },
 };
 
 export function getPlaceProfile(locationId, areaId) {
@@ -104,4 +107,46 @@ export function getPlaceProfile(locationId, areaId) {
 
 export function getScaleInfo(scaleId) {
     return SCALE[scaleId] || SCALE.town;
+}
+
+const WILDERNESS_INTEL_TERRAIN = new Set(['forest', 'mountain', 'danger']);
+
+/** 정보 수집 — 마을·거점만 가능 (숲·약초원·산길 등 야외 불가) */
+export function canGatherIntel(locationId, areaId) {
+    const profile = getPlaceProfile(locationId, areaId);
+    const terrain = profile.terrain;
+
+    if (WILDERNESS_INTEL_TERRAIN.has(terrain)) {
+        if (terrain === 'forest') {
+            return {
+                ok: false,
+                reason: 'forest',
+                message: '숲·약초밭에는 들을 이가 없다. 마을이나 주막으로 가야 한다.',
+                shortHint: '마을·주막만',
+            };
+        }
+        if (terrain === 'mountain') {
+            return {
+                ok: false,
+                reason: 'mountain',
+                message: '험한 산길에서는 소문이 통하지 않는다. 거점으로 내려가야 한다.',
+                shortHint: '거점만',
+            };
+        }
+        return {
+            ok: false,
+            reason: 'danger',
+            message: '험한 곳에서는 정보를 모을 수 없다.',
+            shortHint: '거점만',
+        };
+    }
+    if (profile.scale === 'pass') {
+        return {
+            ok: false,
+            reason: 'pass',
+            message: '관문·요새에서는 정첩이 통하지 않는다.',
+            shortHint: '마을·주막만',
+        };
+    }
+    return { ok: true };
 }

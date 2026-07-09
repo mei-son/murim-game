@@ -2,12 +2,13 @@ import * as state from './state.js';
 import * as martial from './martial.js';
 import * as realm from './realm.js';
 
-/** 전투 유형별 랜덤 깨달음 확률 (매우 낮음) */
-const RANDOM_CHANCE = {
+/** 전투·활동 유형별 랜덤 깨달음 확률 (매우 낮음) */
+export const RANDOM_CHANCE = {
     battle: 0.012,
     spar: 0.008,
     dojo: 0.01,
     gather: 0.006,
+    observe: 0.012,
 };
 
 /**
@@ -33,6 +34,10 @@ const PITY_THRESHOLDS = {
         { at: 800, minRealmRank: 2 },
         { at: 3000, minRealmRank: 4 },
     ],
+    observe: [
+        { at: 500, minRealmRank: 2 },
+        { at: 2000, minRealmRank: 4 },
+    ],
 };
 
 const MARTIAL_EXP_BY_REALM = {
@@ -47,12 +52,15 @@ const MARTIAL_EXP_BY_REALM = {
 export function initEnlightenment(gs = state.gameState) {
     if (!gs.enlightenment) {
         gs.enlightenment = {
-            counts: { battle: 0, spar: 0, dojo: 0, gather: 0 },
+            counts: { battle: 0, spar: 0, dojo: 0, gather: 0, observe: 0 },
             total: 0,
         };
     }
     if (!gs.enlightenment.counts) {
-        gs.enlightenment.counts = { battle: 0, spar: 0, dojo: 0, gather: 0 };
+        gs.enlightenment.counts = { battle: 0, spar: 0, dojo: 0, gather: 0, observe: 0 };
+    }
+    if (gs.enlightenment.counts.observe == null) {
+        gs.enlightenment.counts.observe = 0;
     }
 }
 
@@ -60,6 +68,7 @@ function mapCombatType(context) {
     if (context === 'spar') return 'spar';
     if (context === 'dojo') return 'dojo';
     if (context === 'gather') return 'gather';
+    if (context === 'observe') return 'observe';
     return 'battle';
 }
 
@@ -155,8 +164,8 @@ export function forceEnlightenment(context = 'spar') {
 export function getPityStatus(gs = state.gameState) {
     initEnlightenment(gs);
     const r = realm.getRealm(gs.level);
-    const types = ['battle', 'spar', 'dojo'];
-    const labels = { battle: '전투', spar: '대련', dojo: '도장깨기' };
+    const types = ['battle', 'spar', 'dojo', 'observe'];
+    const labels = { battle: '전투', spar: '대련', dojo: '도장깨기', observe: '견식' };
 
     return types.map(type => {
         const count = gs.enlightenment.counts[type] || 0;
@@ -180,7 +189,7 @@ export function renderEnlightenmentPanel(gs = state.gameState) {
     return `
         <div class="mt-4">
             <h4 class="text-sm text-zinc-500 mb-2"><i class="fas fa-lightbulb mr-1"></i>깨달음</h4>
-            <p class="text-xs text-zinc-600 mb-2">전투·대련·도장깨기 등에서 극히 낮은 확률로 깨달음. 천장 도달 시 확정 발동 — 상위 천장은 경지가 높아야 함.</p>
+            <p class="text-xs text-zinc-600 mb-2">전투·대련·견식·도장깨기 등에서 극히 낮은 확률로 깨달음. 천장 도달 시 확정 발동 — 상위 천장은 경지가 높아야 함.</p>
             <div class="text-xs text-zinc-500 mb-2">누적 깨달음 <span class="text-amber-400 font-bold">${total}</span>회</div>
             <div class="space-y-1.5 text-xs">
                 ${rows.map(row => `

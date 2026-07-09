@@ -35,6 +35,12 @@ const POSE_BY_ACTION = {
 const ANIM_CLASSES = ['sd-anim-attack', 'sd-anim-defend', 'sd-anim-evade', 'sd-anim-hit', 'sd-anim-skill'];
 
 let enemySpriteKey = 'thief';
+const animTimers = { player: null, enemy: null };
+const animTokens = { player: 0, enemy: 0 };
+
+export function getAnimMs(action) {
+    return ANIM_MS[action] || 520;
+}
 
 const RIGHTEOUS_FACTIONS = new Set(['정파']);
 
@@ -143,12 +149,17 @@ export function playBattleAnim(side, action) {
     const pose = POSE_BY_ACTION[action] || 'idle';
     setBattlePose(side, pose);
 
+    if (animTimers[side]) window.clearTimeout(animTimers[side]);
+
     el.classList.remove(...ANIM_CLASSES);
     void el.offsetWidth;
     el.classList.add(`sd-anim-${action}`);
 
-    const ms = ANIM_MS[action] || 520;
-    window.setTimeout(() => {
+    const ms = getAnimMs(action);
+    const token = ++animTokens[side];
+    animTimers[side] = window.setTimeout(() => {
+        if (animTokens[side] !== token) return;
+        animTimers[side] = null;
         el.classList.remove(`sd-anim-${action}`);
         setBattlePose(side, 'idle');
     }, ms);

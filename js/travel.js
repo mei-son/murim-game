@@ -6,6 +6,7 @@ import * as battle from './battle.js';
 import * as encounters from './encounters.js';
 import * as sects from './sects.js';
 import * as debug from './debug.js';
+import * as stamina from './stamina.js';
 
 let pending = null;
 let journeyRunning = false;
@@ -29,6 +30,11 @@ export function requestTravel(type, targetId) {
             return;
         }
         const days = map.getAreaTravelDays(gs.currentRegion, gs.currentArea, targetId);
+        const stCost = stamina.getTravelStaminaCost(days, false);
+        if (!stamina.canAfford(stCost, gs)) {
+            ui.mapToast(stamina.staminaBlockedMessage('이동', stCost, gs));
+            return;
+        }
         pending = { type, targetId, days, from: gs.currentArea };
         showConfirm(targetId, days, map.getTerrainLabel(targetId, gs.currentRegion), '지역 이동');
     } else if (type === 'local') {
@@ -37,6 +43,11 @@ export function requestTravel(type, targetId) {
             return;
         }
         const days = map.getLocalTravelDays(gs.currentArea, gs.currentLocation, targetId);
+        const stCost = stamina.getTravelStaminaCost(days, true);
+        if (!stamina.canAfford(stCost, gs)) {
+            ui.mapToast(stamina.staminaBlockedMessage('이동', stCost, gs));
+            return;
+        }
         const local = map.localMaps[gs.currentArea];
         const tile = local?.spots[targetId]?.tile ?? 'road';
         pending = { type, targetId, days, from: gs.currentLocation };
@@ -50,7 +61,17 @@ function showConfirm(name, days, terrain, kind) {
     const icon = pending?.type === 'local'
         ? map.getLocalSpotIcon(gs.currentArea, name)
         : (map.regionAreas[gs.currentRegion]?.spots[name]?.icon ?? '📍');
-    const normalPct = Math.round(encounters.getTravelEncounterChance(gs.fame, days) * 100);
+    const destArea = pending?.type === 'area' ? name : gs.currentArea;
+    const destLoc = pending?.type === 'local' ? name : gs.currentLocation;
+    const destTerrain = map.getSpotTile(
+        pending?.type === 'local' ? name : name,
+        pending?.type === 'local' ? gs.currentArea : null,
+        gs.currentRegion,
+    ) || 'road';
+    const wildRisk = encounters.formatWildernessRisk(destArea, destLoc, destTerrain, days, gs);
+    const normalPct = wildRisk
+        ? Math.round(encounters.getWildernessTravelChance(gs.fame, days, destTerrain) * 100)
+        : Math.round(encounters.getTravelEncounterChance(gs.fame, days) * 100);
     const namedPct = Math.round(encounters.getNamedEncounterChance(gs.fame, days) * 100);
 
     document.getElementById('travel-target-name').textContent = name;
@@ -59,7 +80,17 @@ function showConfirm(name, days, terrain, kind) {
     document.getElementById('travel-terrain').textContent = terrain;
     document.getElementById('travel-kind').textContent = kind;
     document.getElementById('travel-from').textContent = pending.from;
-    document.getElementById('travel-risk').textContent = `${normalPct}%`;
+    document.getElementById('travel-risk').textContent = wildRisk ? wildRisk : `${normalPct}%`;
+    const travelStaminaEl = document.getElementById('travel-stamina-cost');
+    if (travelStaminaEl) {
+        const stCost = stamina.getTravelStaminaCost(days, pending?.type === 'local');
+        travelStaminaEl.textContent = `${stCost} SP`;
+        travelStaminaEl.className = stamina.canAfford(stCost, gs)
+            ? 'text-lime-400 font-bold text-lg'
+            : 'text-red-400 font-bold text-lg';
+    }
+    const travelStaminaCur = document.getElementById('travel-stamina-current');
+    if (travelStaminaCur) travelStaminaCur.textContent = stamina.formatStamina(gs);
     const namedRiskEl = document.getElementById('travel-named-risk');
     if (namedRiskEl) namedRiskEl.textContent = `${namedPct}%`;
     const modeEl = document.getElementById('travel-battle-mode');
@@ -85,7 +116,13 @@ export function confirmTravel() {
         debug.log('travel', 'confirmTravel blocked — no pending trip');
         return;
     }
+    const gs = state.gameState;
     const trip = { ...pending };
+    const stCost = stamina.getTravelStaminaCost(trip.days, trip.type === 'local');
+    if (!stamina.canAfford(stCost, gs)) {
+        ui.mapToast(stamina.staminaBlockedMessage('이동', stCost, gs));
+        return;
+    }
     debug.log('travel', 'confirmTravel → startJourney', trip);
     cancelTravel();
     startJourney(trip);
@@ -100,6 +137,10 @@ async function startJourney(trip) {
     let aborted = false;
     let encounterCount = 0;
 
+    const travelStaminaCost = stamina.getTravelStaminaCost(days, type === 'local');
+    stamina.spend(travelStaminaCost, gs);
+    state.addLog(`🚶 이동 준비 — 스테미나 ${travelStaminaCost} 소모 (${stamina.formatStamina(gs)})`);
+
     try {
         for (let d = 1; d <= days; d++) {
         const progress = (d / days) * 100;
@@ -108,7 +149,16 @@ async function startJourney(trip) {
         await delay(550);
 
         const encounterArea = type === 'area' ? targetId : gs.currentArea;
-        const roll = encounters.rollTravelEncounter(gs.fame, days, encounterArea);
+        const encounterLoc = type === 'local' ? targetId : gs.currentLocation;
+        const encounterTerrain = map.getSpotTile(
+            type === 'local' ? targetId : targetId,
+            type === 'local' ? gs.currentArea : null,
+            gs.currentRegion,
+        ) || 'road';
+        const roll = encounters.rollTravelEncounter(gs.fame, days, encounterArea, {
+            terrain: encounterTerrain,
+            location: encounterLoc,
+        });
         if (roll) {
             encounterCount++;
             const enemy = roll.enemy;
@@ -186,6 +236,7 @@ async function startJourney(trip) {
         }
 
         gs.day += 1;
+        stamina.onDayAdvanced(gs);
     }
 
     if (!aborted) {

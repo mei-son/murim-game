@@ -7,19 +7,30 @@ import * as enlightenment from './enlightenment.js';
 import * as intel from './intel.js';
 import * as battleSd from './battle-sd.js';
 import * as debug from './debug.js';
+import * as stamina from './stamina.js';
+import * as inventory from './inventory.js';
+import * as exchange from './battle-exchange.js';
 
 let currentEnemy = null;
 let battleLog = [];
 let onVictory = null;
-let defending = false;
 let battleContext = 'normal';
+let playerHasInitiative = true;
 let pendingTravelResolve = null;
 let battleWasManual = false;
 let battleRound = 0;
 let victoryRewardMode = 'default';
 let pendingBattleFinalize = null;
-let playerBattleStamina = 100;
 let enemyBattleStamina = 100;
+let battleResolutionPending = false;
+let battleResolutionTimer = null;
+/** 전투 중 무공별 숙련 누적 { artId: exp } */
+let battleMartialUsage = {};
+
+function getPlayerBattleStamina(gs = state.gameState) {
+    stamina.initStamina(gs);
+    return gs.stamina;
+}
 
 export function getBattleDebugState() {
     return {
@@ -35,19 +46,73 @@ export function getBattleDebugState() {
 }
 
 const EVADE_ACTION_BONUS = 15;
-const COUNTER_DAMAGE_RATIO = 0.9;
-const CRITICAL_STRIKE_MULT = 3;
 const BATTLE_STAMINA_MAX = 100;
-const EVADE_STAMINA_COST = 28;
-const STAMINA_REGEN_PER_EXCHANGE = 12;
+const EVADE_STAMINA_COST = stamina.STAMINA_COST.battleEvade;
+const STAMINA_REGEN_PER_EXCHANGE = stamina.STAMINA_COST.battleRegen;
 const LOW_HP_EVADE_MAX_BONUS = 20;
 const MAX_ACTIVE_EVADE_CHANCE = 85;
 
 function resetBattleStance() {
-    defending = false;
     battleRound = 0;
-    playerBattleStamina = BATTLE_STAMINA_MAX;
+    playerHasInitiative = Math.random() < 0.5;
+    battleMartialUsage = {};
+    battleResolutionPending = false;
+    if (battleResolutionTimer) {
+        window.clearTimeout(battleResolutionTimer);
+        battleResolutionTimer = null;
+    }
+    stamina.initStamina(state.gameState);
+    inventory.initInventory(state.gameState);
+    martial.initMartialArts(state.gameState);
     enemyBattleStamina = BATTLE_STAMINA_MAX;
+}
+
+/** 마지막 타격 연출·HP 0 표시 후 승패 처리 */
+function estimateExchangePresentationMs(playerAction, enemyAction, result) {
+    let ms = 0;
+    const pAnim = playerAction === 'skill' ? 'skill' : playerAction;
+    if (['attack', 'defend', 'evade', 'skill'].includes(playerAction)) {
+        ms = Math.max(ms, battleSd.getAnimMs(pAnim));
+    }
+    if (result.enemyDamage > 0) {
+        ms = Math.max(ms, battleSd.getAnimMs('hit') + 200);
+    } else if (enemyAction === 'attack') {
+        ms = Math.max(ms, battleSd.getAnimMs('attack'));
+    }
+    if (result.playerDamage > 0) {
+        ms = Math.max(ms, battleSd.getAnimMs('hit'));
+    }
+    return ms + 720;
+}
+
+function scheduleBattleResolution(callback, delayMs) {
+    battleResolutionPending = true;
+    battleResolutionTimer = window.setTimeout(() => {
+        battleResolutionTimer = null;
+        battleResolutionPending = false;
+        callback();
+    }, delayMs);
+}
+
+function presentBattleVictory(enemy, playerAction, enemyAction, result) {
+    enemy.hp = 0;
+    logBattle(`🎉 ${getEnemyDisplayName(enemy)}을(를) 물리쳤다!`, 'system');
+    refreshBattleHud();
+    updateBattleUI();
+    scheduleBattleResolution(() => endBattle(true), estimateExchangePresentationMs(playerAction, enemyAction, result));
+}
+
+function presentBattleDefeat(gs, playerAction, enemyAction, result) {
+    logBattle('💀 쓰러졌다...', 'system');
+    refreshBattleHud();
+    updateBattleUI();
+    const delay = Math.max(estimateExchangePresentationMs(playerAction, enemyAction, result), battleSd.getAnimMs('hit') + 500);
+    scheduleBattleResolution(() => endBattle(false, true), delay);
+}
+
+function recordBattleMartialUsage(gs, result, action) {
+    const style = exchange.getPlayerBattleStyle(gs);
+    martial.accumulateBattleMartialUsage(battleMartialUsage, style, result, action);
 }
 
 function calcLowHpEvasionBonus(hp, maxHp) {
@@ -79,15 +144,8 @@ function getEnemyEvadeTendency(enemy, gs = state.gameState) {
     return '낮음';
 }
 
-function pickEnemyAction(enemy, gs = state.gameState, stamina = enemyBattleStamina) {
-    if (stamina < EVADE_STAMINA_COST) return 'attack';
-    const enemyLv = getEnemyLevel(enemy);
-    const gap = enemyLv - gs.level;
-    let evadeWeight = 0.1 + Math.max(0, gap) * 0.1 + Math.max(0, enemyLv - 3) * 0.02;
-    if (gap >= 2) evadeWeight += 0.14;
-    if (enemy.maxHp > 0 && enemy.hp / enemy.maxHp < 0.4) evadeWeight += 0.1;
-    evadeWeight = Math.min(0.7, evadeWeight);
-    return Math.random() < evadeWeight ? 'evade' : 'attack';
+function pickEnemyAction(enemy, gs = state.gameState, eStamina = enemyBattleStamina) {
+    return exchange.pickEnemyBattleAction(enemy, gs, eStamina, EVADE_STAMINA_COST);
 }
 
 function describeEnemyEvade(enemy, success) {
@@ -110,20 +168,20 @@ function getActiveEvadeChanceFor(hp, maxHp, passiveRate) {
 }
 
 function canEvade(isPlayer = true) {
-    const stamina = isPlayer ? playerBattleStamina : enemyBattleStamina;
-    return stamina >= EVADE_STAMINA_COST;
+    if (isPlayer) return getPlayerBattleStamina() >= EVADE_STAMINA_COST;
+    return enemyBattleStamina >= EVADE_STAMINA_COST;
 }
 
 function spendEvadeStamina(isPlayer = true) {
     if (isPlayer) {
-        playerBattleStamina = Math.max(0, playerBattleStamina - EVADE_STAMINA_COST);
+        stamina.spend(EVADE_STAMINA_COST, state.gameState);
     } else {
         enemyBattleStamina = Math.max(0, enemyBattleStamina - EVADE_STAMINA_COST);
     }
 }
 
 function regenBattleStamina() {
-    playerBattleStamina = Math.min(BATTLE_STAMINA_MAX, playerBattleStamina + STAMINA_REGEN_PER_EXCHANGE);
+    stamina.restore(STAMINA_REGEN_PER_EXCHANGE, state.gameState);
     enemyBattleStamina = Math.min(BATTLE_STAMINA_MAX, enemyBattleStamina + STAMINA_REGEN_PER_EXCHANGE);
 }
 
@@ -183,6 +241,13 @@ function describeEvade(gs, success, hp = gs.hp) {
 }
 
 function appendBattleIntro(gs) {
+    const initLabel = playerHasInitiative ? '선공' : '후공';
+    const ngUnlocked = martial.isNaegongUnlocked(gs);
+    logBattle(`🎲 ${initLabel} — 한합마다 동시에 행동을 정하고 겨룬다`, 'system');
+    logBattle('✊ 묵찌바 — 공격→회피 · 회피→방어 · 방어→공격', 'system');
+    const weaponNote = inventory.formatWeaponDurability(gs);
+    const style = exchange.getPlayerBattleStyle(gs);
+    logBattle(`무기: ${weaponNote} · 전투형 ${style.label}`, 'player');
     const passive = martial.getEvasionRate(gs);
     const active = getActiveEvadeChance(gs);
     const lowHpBonus = calcLowHpEvasionBonus(gs.hp, gs.maxHp);
@@ -190,7 +255,10 @@ function appendBattleIntro(gs) {
     if (passive >= 36) evadeNote = '보법이 몸에 배어 있다';
     else if (passive >= 21) evadeNote = '발놀림이 괜찮다';
     const lowHpNote = lowHpBonus > 0 ? ` · 위기 보너스 +${lowHpBonus}%` : '';
-    logBattle(`회피 ${passive}% (${evadeNote}) · 적극 회피 ${active}%${lowHpNote} · 스테미나 ${EVADE_STAMINA_COST}/회`, 'player');
+    const critNote = ngUnlocked
+        ? '내공술=필살(회심) · 회피=회피만'
+        : '회피 성공=회심(치명)';
+    logBattle(`${critNote} · 회피 ${passive}% (${evadeNote}) · 적극 ${active}%${lowHpNote} · 실패×${exchange.EVADE_FAIL_MULT} · 스테미나 ${EVADE_STAMINA_COST}/회`, 'player');
     if (currentEnemy) {
         const enemyLv = getEnemyLevel(currentEnemy);
         const enemyPassive = getEnemyPassiveEvasion(currentEnemy);
@@ -203,8 +271,8 @@ function appendBattleIntro(gs) {
 }
 
 function calcAttackDamage(gs, enemy, mult = 1) {
-    const raw = gs.atk - enemy.def + Math.floor(Math.random() * 5);
-    return Math.max(1, Math.floor(raw * mult));
+    const pAtk = exchange.getPlayerBattleAtk(gs);
+    return exchange.calcBattleDamage(pAtk, enemy.def, mult, playerHasInitiative);
 }
 
 function getActiveEvadeChance(gs) {
@@ -234,13 +302,13 @@ function escapeHtml(text) {
 function classifyBattleLine(raw, side) {
     let cls = 'battle-log-line';
     if (side === 'player') {
-        if (/치명타/.test(raw)) cls += ' battle-log-crit battle-log-player-atk';
+        if (/치명타|회심|필살/.test(raw)) cls += ' battle-log-crit battle-log-player-atk';
         else if (/회피|💨/.test(raw)) cls += ' battle-log-evade';
         else if (/방어/.test(raw)) cls += ' battle-log-defend';
         else if (/도망/.test(raw)) cls += ' battle-log-flee';
         else cls += ' battle-log-player-atk';
     } else if (side === 'enemy') {
-        if (/치명타/.test(raw)) cls += ' battle-log-crit battle-log-enemy-atk';
+        if (/치명타|회심|필살/.test(raw)) cls += ' battle-log-crit battle-log-enemy-atk';
         else if (/회피|💨/.test(raw)) cls += ' battle-log-evade battle-log-enemy-atk';
         else if (/방어/.test(raw)) cls += ' battle-log-defend battle-log-enemy-atk';
         else cls += ' battle-log-enemy-atk';
@@ -285,31 +353,34 @@ function renderBattleLog() {
     logEl.scrollTop = 0;
 }
 
-function applyAttackToEnemy(gs, enemy, mult = 1, logPrefix = '공격') {
-    const dmg = calcAttackDamage(gs, enemy, mult);
-    enemy.hp -= dmg;
-    logBattle(`${logPrefix}! ${enemy.name}에게 ${dmg} 피해`, 'player');
-    return dmg;
-}
-
-function checkVictoryAfterHit() {
+/** HP·전투 로그만 즉시 반영 (합 중간 갱신) */
+function refreshBattleHud() {
+    const gs = state.gameState;
     const enemy = currentEnemy;
-    if (!enemy || enemy.hp > 0) return false;
-    enemy.hp = 0;
-    logBattle(`🎉 ${getEnemyDisplayName(enemy)}을(를) 물리쳤다!`, 'system');
-    updateBattleUI();
-    endBattle(true);
-    return true;
+    if (!enemy) return;
+
+    document.getElementById('player-hp-bar').style.width = `${(gs.hp / gs.maxHp) * 100}%`;
+    document.getElementById('player-hp-text').textContent = `${gs.hp}/${gs.maxHp}`;
+    const ngUnlocked = martial.isNaegongUnlocked(gs);
+    const ngPct = ngUnlocked && gs.maxNaegong > 0 ? (gs.naegong / gs.maxNaegong) * 100 : 0;
+    document.getElementById('player-ng-bar').style.width = `${ngPct}%`;
+    document.getElementById('player-ng-text').textContent = ngUnlocked
+        ? `${gs.naegong}/${gs.maxNaegong}`
+        : '내공 미타동';
+    document.getElementById('enemy-hp-bar').style.width = `${(enemy.hp / enemy.maxHp) * 100}%`;
+    document.getElementById('enemy-hp-text').textContent = `${enemy.hp}/${enemy.maxHp}`;
+    renderBattleLog();
 }
 
 function pickAutoPlayerAction(gs, enemy, stamina = BATTLE_STAMINA_MAX) {
-    if (martial.isNaegongUnlocked(gs) && gs.naegong >= 15 && enemy.hp > gs.atk * 1.2 && Math.random() < 0.35) {
+    if (martial.isNaegongUnlocked(gs) && gs.naegong >= 15 && enemy.hp > exchange.getPlayerBattleAtk(gs) * 1.5 && Math.random() < 0.28) {
         return 'skill';
     }
     const roll = Math.random();
-    if (roll < 0.52) return 'attack';
-    if (roll < 0.72 && stamina >= EVADE_STAMINA_COST) return 'evade';
-    return 'defend';
+    if (roll < 0.46) return 'attack';
+    if (roll < 0.64 && stamina >= EVADE_STAMINA_COST) return 'evade';
+    if (roll < 0.82) return 'defend';
+    return 'attack';
 }
 
 function autoBattleLog(log, text, side) {
@@ -317,107 +388,81 @@ function autoBattleLog(log, text, side) {
 }
 
 export function simulateAutoBattle(gs, enemy) {
-    enemy = encounters.scaleEnemyForBattle(enemy, gs);
+    enemy = exchange.initEnemyWeapon(exchange.tuneEnemyForBattle(
+        encounters.scaleEnemyForBattle(enemy, gs),
+    ));
     const log = [];
     let pHp = gs.hp;
     let pNg = gs.naegong;
-    let eHp = enemy.hp;
+    let eSnap = { ...enemy };
     let turn = 0;
-    let autoDefending = false;
-    let pStamina = BATTLE_STAMINA_MAX;
+    let pStamina = getPlayerBattleStamina(gs);
     let eStamina = BATTLE_STAMINA_MAX;
-    const maxTurns = 50;
+    const initiative = Math.random() < 0.5;
+    const maxTurns = 36;
+    const gsSnap = { ...gs };
+    const martialUsage = {};
 
-    while (pHp > 0 && eHp > 0 && turn < maxTurns) {
+    while (pHp > 0 && eSnap.hp > 0 && turn < maxTurns) {
         turn++;
-        pStamina = Math.min(BATTLE_STAMINA_MAX, pStamina + STAMINA_REGEN_PER_EXCHANGE);
+        pStamina = Math.min(gs.maxStamina || BATTLE_STAMINA_MAX, pStamina + STAMINA_REGEN_PER_EXCHANGE);
         eStamina = Math.min(BATTLE_STAMINA_MAX, eStamina + STAMINA_REGEN_PER_EXCHANGE);
         log.push({ type: 'round', n: turn });
-        const action = pickAutoPlayerAction({ ...gs, naegong: pNg }, { ...enemy, hp: eHp }, pStamina);
-        let skipEnemyTurn = false;
-        let dmg = 0;
 
-        if (action === 'skill') {
-            pNg -= 15;
-            dmg = Math.max(1, gs.atk * 2 - enemy.def + Math.floor(Math.random() * 6));
-            eHp -= dmg;
-            autoBattleLog(log, `⚡ 내공술! ${enemy.name}에게 ${dmg} 피해 (적 HP ${Math.max(0, eHp)})`, 'player');
-        } else if (action === 'attack') {
-            dmg = calcAttackDamage(gs, enemy);
-            eHp -= dmg;
-            autoBattleLog(log, `🗡️ 공격! ${enemy.name}에게 ${dmg} 피해 (적 HP ${Math.max(0, eHp)})`, 'player');
-        } else if (action === 'defend') {
-            autoDefending = true;
-            autoBattleLog(log, '🛡️ 방어 자세', 'player');
-        } else if (action === 'evade') {
-            if (pStamina < EVADE_STAMINA_COST) {
-                autoBattleLog(log, '💨 스테미나 고갈 — 회피 불가', 'player');
-            } else {
-                pStamina -= EVADE_STAMINA_COST;
-                if (rollActiveEvade(gs, pHp)) {
-                    const evMsg = describeEvade(gs, true, pHp);
-                    if (Math.random() < 0.5) {
-                        dmg = calcAttackDamage(gs, enemy, COUNTER_DAMAGE_RATIO);
-                        eHp -= dmg;
-                        autoBattleLog(log, `💨 ${evMsg} → 반격! ${dmg} 피해 (적 HP ${Math.max(0, eHp)})`, 'player');
-                    } else {
-                        dmg = calcAttackDamage(gs, enemy, CRITICAL_STRIKE_MULT);
-                        eHp -= dmg;
-                        autoBattleLog(log, `💨 ${evMsg} → 빈틈 발견! 치명타 ${dmg} 피해 (적 HP ${Math.max(0, eHp)})`, 'player');
-                    }
-                    skipEnemyTurn = true;
-                } else {
-                    autoBattleLog(log, `💨 ${describeEvade(gs, false, pHp)}`, 'player');
-                }
-            }
+        let pAction = pickAutoPlayerAction({ ...gsSnap, naegong: pNg, hp: pHp }, eSnap, pStamina);
+        if (pAction === 'evade' && pStamina < EVADE_STAMINA_COST) pAction = 'attack';
+        let eAction = pickEnemyAction(eSnap, gsSnap, eStamina);
+        if (eAction === 'evade' && eStamina < EVADE_STAMINA_COST) eAction = 'attack';
+
+        if (pAction === 'evade') pStamina -= EVADE_STAMINA_COST;
+        if (eAction === 'evade') eStamina -= EVADE_STAMINA_COST;
+
+        const result = exchange.resolveExchange(
+            { ...gsSnap, hp: pHp, naegong: pNg },
+            eSnap,
+            pAction,
+            eAction,
+            initiative,
+            {
+                naegongOk: martial.isNaegongUnlocked(gsSnap) && pNg >= 15,
+                naegongUnlocked: martial.isNaegongUnlocked(gsSnap),
+            },
+        );
+
+        if (result.fleeSuccess === true) {
+            autoBattleLog(log, '도망 성공', 'player');
+            return {
+                victory: false,
+                defeat: false,
+                fled: true,
+                playerHp: pHp,
+                playerNg: pNg,
+                playerStamina: pStamina,
+                enemyHp: eSnap.hp,
+                log,
+                turns: turn,
+                martialUsage,
+            };
         }
 
-        if (eHp <= 0) break;
-        if (skipEnemyTurn) continue;
+        if (result.naegongCost) pNg -= result.naegongCost;
+        mergeEnemyWeaponState(eSnap, result.enemy);
+        pHp = Math.max(0, pHp - result.playerDamage);
+        eSnap.hp = Math.max(0, eSnap.hp - result.enemyDamage);
+        martial.accumulateBattleMartialUsage(
+            martialUsage,
+            exchange.getPlayerBattleStyle({ ...gsSnap, hp: pHp }),
+            result,
+            pAction,
+        );
 
-        const enemyAction = pickEnemyAction({ ...enemy, hp: eHp }, gs, eStamina);
-        if (enemyAction === 'evade' && eStamina >= EVADE_STAMINA_COST) {
-            eStamina -= EVADE_STAMINA_COST;
-            const enemySnap = { ...enemy, hp: eHp, maxHp: enemy.maxHp || enemy.hp };
-            if (rollEnemyActiveEvade(enemySnap)) {
-                const evMsg = describeEnemyEvade(enemySnap, true);
-                if (Math.random() < 0.5) {
-                    dmg = Math.max(1, Math.floor((enemy.atk - gs.def + Math.floor(Math.random() * 3)) * COUNTER_DAMAGE_RATIO));
-                    if (autoDefending) {
-                        dmg = Math.floor(dmg / 2);
-                        autoDefending = false;
-                        autoBattleLog(log, `💨 ${evMsg} → ${enemy.name} 반격 (방어) ${dmg} 피해 (내 HP ${Math.max(0, pHp - dmg)})`, 'enemy');
-                    } else {
-                        autoBattleLog(log, `💨 ${evMsg} → ${enemy.name} 반격! ${dmg} 피해 (내 HP ${Math.max(0, pHp - dmg)})`, 'enemy');
-                    }
-                } else {
-                    dmg = Math.max(1, Math.floor((enemy.atk - gs.def + Math.floor(Math.random() * 3)) * CRITICAL_STRIKE_MULT));
-                    if (autoDefending) {
-                        dmg = Math.floor(dmg / 2);
-                        autoDefending = false;
-                        autoBattleLog(log, `💨 ${evMsg} → ${enemy.name} 치명타 (방어) ${dmg} 피해 (내 HP ${Math.max(0, pHp - dmg)})`, 'enemy');
-                    } else {
-                        autoBattleLog(log, `💨 ${evMsg} → ${enemy.name} 치명타! ${dmg} 피해 (내 HP ${Math.max(0, pHp - dmg)})`, 'enemy');
-                    }
-                }
-                pHp -= dmg;
-                continue;
-            }
-            autoBattleLog(log, `💨 ${describeEnemyEvade(enemySnap, false)}`, 'enemy');
+        for (const line of result.lines) {
+            autoBattleLog(log, line.text, line.side);
         }
-
-        dmg = Math.max(1, enemy.atk - gs.def + Math.floor(Math.random() * 3));
-        if (autoDefending) {
-            dmg = Math.floor(dmg / 2);
-            autoDefending = false;
-            autoBattleLog(log, `💥 ${enemy.name} 공격 (방어) ${dmg} 피해 (내 HP ${Math.max(0, pHp - dmg)})`, 'enemy');
-        } else {
-            autoBattleLog(log, `💥 ${enemy.name} 공격! ${dmg} 피해 (내 HP ${Math.max(0, pHp - dmg)})`, 'enemy');
-        }
-        pHp -= dmg;
+        autoBattleLog(log, `(HP 나 ${Math.max(0, pHp)} / 적 ${Math.max(0, eSnap.hp)})`, 'system');
     }
 
-    const victory = eHp <= 0 && pHp > 0;
+    const victory = eSnap.hp <= 0 && pHp > 0;
     const defeat = pHp <= 0 || (!victory && turn >= maxTurns);
 
     return {
@@ -425,14 +470,21 @@ export function simulateAutoBattle(gs, enemy) {
         defeat,
         playerHp: Math.max(0, pHp),
         playerNg: Math.max(0, pNg),
-        enemyHp: Math.max(0, eHp),
+        playerStamina: Math.max(0, pStamina),
+        enemyHp: Math.max(0, eSnap.hp),
         log,
         turns: turn,
+        martialUsage,
     };
 }
 
 export function applyBattleStats(result) {
-    state.modifyStats({ hp: result.playerHp, naegong: result.playerNg });
+    const changes = { hp: result.playerHp, naegong: result.playerNg };
+    state.modifyStats(changes);
+    if (result.playerStamina != null) {
+        stamina.initStamina(state.gameState);
+        state.gameState.stamina = Math.max(0, result.playerStamina);
+    }
 }
 
 export function getDailyEncounterChance(fame, totalDays) {
@@ -448,7 +500,7 @@ function getEnemyDisplayName(enemy) {
 }
 
 function buildVictoryRewards(enemy) {
-    const opts = { manual: battleWasManual };
+    const opts = { manual: battleWasManual, usageMap: { ...battleMartialUsage } };
     if (enemy.named) return encounters.applyNamedVictoryRewards(enemy, opts);
     return encounters.applyNormalVictoryRewards(enemy, opts);
 }
@@ -458,6 +510,12 @@ function buildVictoryResultSubtitle(enemy, rewards) {
     if (enemy?.named && enemy.title) parts.push(enemy.title);
     if (rewards.martialExpGain) {
         let m = `무공 숙련 +${rewards.martialExpGain}`;
+        if (rewards.martialByArt) {
+            const detail = Object.entries(rewards.martialByArt)
+                .map(([id, exp]) => `${martial.getArtDef(id)?.name || id} +${exp}`)
+                .join(', ');
+            if (detail) m += ` (${detail})`;
+        }
         if (rewards.martialLevelUps?.length) {
             m += ` → ${rewards.martialLevelUps.map(u => `${u.name} Lv.${u.level}`).join(', ')}`;
         }
@@ -503,7 +561,9 @@ export function startNamedBattle(enemy, context = 'normal', victoryCallback) {
 
 export function startBattleFromEnemy(enemy, context = 'normal', victoryCallback) {
     debug.log('battle', 'startBattleFromEnemy', { context, enemy: enemy?.name, named: enemy?.named });
-    const scaled = encounters.scaleEnemyForBattle(enemy, state.gameState, { context });
+    let scaled = encounters.scaleEnemyForBattle(enemy, state.gameState, { context });
+    scaled = exchange.tuneEnemyForBattle(scaled);
+    scaled = exchange.initEnemyWeapon(scaled);
     currentEnemy = { ...scaled, maxHp: scaled.maxHp || scaled.hp };
     const label = getEnemyDisplayName(currentEnemy);
     battleLog = [];
@@ -553,6 +613,12 @@ function formatNaegongRewardNote(rewards) {
 function formatMartialRewardNote(rewards) {
     if (!rewards.martialExpGain) return '';
     let note = ` · 무공 숙련 +${rewards.martialExpGain}`;
+    if (rewards.martialByArt) {
+        const detail = Object.entries(rewards.martialByArt)
+            .map(([id, exp]) => `${martial.getArtDef(id)?.name || id} +${exp}`)
+            .join(', ');
+        if (detail) note += ` (${detail})`;
+    }
     if (rewards.martialLevelUps?.length) {
         note += ` → ${rewards.martialLevelUps.map(u => `${u.name} Lv.${u.level}`).join(', ')}`;
     }
@@ -593,7 +659,9 @@ export async function handleTravelEncounter(enemy) {
         pendingTravelResolve = resolve;
         battleContext = 'travel';
         debug.log('battle', 'travel encounter — manual battle open', { enemy: enemy?.name });
-        const scaled = encounters.scaleEnemyForBattle(enemy, state.gameState, { context: 'travel' });
+        let scaled = encounters.scaleEnemyForBattle(enemy, state.gameState, { context: 'travel' });
+        scaled = exchange.tuneEnemyForBattle(scaled);
+        scaled = exchange.initEnemyWeapon(scaled);
         currentEnemy = { ...scaled, maxHp: scaled.maxHp || scaled.hp };
         const label = getEnemyDisplayName(currentEnemy);
         battleLog = [];
@@ -614,6 +682,7 @@ export function runAutoBattle() {
     if (!currentEnemy) return;
     battleWasManual = false;
     const result = simulateAutoBattle(state.gameState, currentEnemy);
+    battleMartialUsage = { ...(result.martialUsage || {}) };
     battleLog = [{ type: 'line', text: `🤖 자동 전투 개시 (${result.turns}합)`, side: 'system' }];
     appendBattleIntro(state.gameState);
     for (const entry of result.log) {
@@ -623,20 +692,22 @@ export function runAutoBattle() {
     applyBattleStats(result);
 
     if (result.victory) {
+        currentEnemy.hp = 0;
         logBattle(`🎉 ${getEnemyDisplayName(currentEnemy)}을(를) 물리쳤다!`, 'system');
         updateBattleUI();
-        endBattle(true);
+        scheduleBattleResolution(() => endBattle(true), 900);
         return;
     }
     logBattle(result.defeat ? '💀 전투에서 패배했다...' : '⏱️ 승부가 나지 않아 후퇴했다.', 'system');
     updateBattleUI();
-    endBattle(false, true);
+    scheduleBattleResolution(() => endBattle(false, true), 600);
 }
 
 /** 이동 중 조우 — 자동 전투 즉시 처리 */
 export function resolveTravelEncounter(enemy) {
     battleWasManual = false;
     const result = simulateAutoBattle(state.gameState, enemy);
+    battleMartialUsage = { ...(result.martialUsage || {}) };
     applyBattleStats(result);
     let rewards = null;
     if (result.victory) rewards = travelVictoryReward(enemy);
@@ -703,11 +774,13 @@ function updateBattleUI() {
 
     const playerStaminaBar = document.getElementById('player-stamina-bar');
     const playerStaminaText = document.getElementById('player-stamina-text');
+    const playerSt = getPlayerBattleStamina(gs);
+    const playerStMax = gs.maxStamina || BATTLE_STAMINA_MAX;
     if (playerStaminaBar) {
-        playerStaminaBar.style.width = `${(playerBattleStamina / BATTLE_STAMINA_MAX) * 100}%`;
+        playerStaminaBar.style.width = `${(playerSt / playerStMax) * 100}%`;
     }
     if (playerStaminaText) {
-        playerStaminaText.textContent = `스테미나 ${playerBattleStamina}/${BATTLE_STAMINA_MAX}`;
+        playerStaminaText.textContent = `스테미나 ${playerSt}/${playerStMax}`;
     }
 
     const enemyStaminaBar = document.getElementById('enemy-stamina-bar');
@@ -722,14 +795,25 @@ function updateBattleUI() {
     renderBattleLog();
 
     const actions = document.getElementById('battle-actions');
-    const autoDisabled = enemy.hp <= 0 || gs.hp <= 0;
+    const autoDisabled = enemy.hp <= 0 || gs.hp <= 0 || battleResolutionPending;
     const showAutoBtn = !state.gameState.autoBattle || battleContext === 'travel' || battleContext === 'gather';
     actions.className = 'grid grid-cols-3 gap-3 battle-actions-grid';
     const evadeRate = getActiveEvadeChance(gs);
     const lowHpBonus = calcLowHpEvasionBonus(gs.hp, gs.maxHp);
     const evadeDisabled = autoDisabled || !canEvade(true);
-    const moveHint = '공격 · 방어 · 회피 — 회피 성공 시 반격 또는 치명타(×3) · 합마다 스테미나 회복';
+    const initTag = playerHasInitiative ? '선공' : '후공';
+    const style = exchange.getPlayerBattleStyle(gs);
+    const weaponTag = inventory.formatWeaponDurability(gs);
+    const rpsHint = '공→회피→방→공';
+    const critHint = ngUnlocked ? '내공술=필살' : '회피=회심';
+    const moveHint = `${initTag} · ${weaponTag} · ${style.label} — ${rpsHint} · ${critHint}`;
+    const resolutionNote = battleResolutionPending
+        ? (enemy.hp <= 0
+            ? '<p class="col-span-3 text-center text-amber-400 text-sm py-2 animate-pulse">적 HP 0 — 승리 정산 중...</p>'
+            : '<p class="col-span-3 text-center text-red-400/90 text-sm py-2">전투 종료...</p>')
+        : '';
     actions.innerHTML = `
+        ${resolutionNote}
         ${showAutoBtn ? `
         <button onclick="window.runAutoBattle()" ${autoDisabled ? 'disabled' : ''}
             class="choice-btn p-3 bg-amber-900/60 hover:bg-amber-800 border-2 border-amber-500 rounded-xl font-bold col-span-3 text-sm
@@ -742,25 +826,25 @@ function updateBattleUI() {
         <p class="col-span-3 text-center text-xs text-zinc-500 -mt-1 mb-1">${moveHint}</p>
         <button onclick="window.battleAction('attack')" ${autoDisabled ? 'disabled' : ''}
             class="choice-btn p-3 bg-red-900/50 hover:bg-red-800 border border-red-600 rounded-xl font-bold text-sm"
-            title="기본 공격">
+            title="묵찌바: 회피를 이김">
             <i class="fas fa-fist-raised mr-1"></i>공격
         </button>
         <button onclick="window.battleAction('defend')" ${autoDisabled ? 'disabled' : ''}
             class="choice-btn p-3 bg-blue-900/50 hover:bg-blue-800 border border-blue-600 rounded-xl font-bold text-sm"
-            title="받는 피해 절반">
+            title="묵찌바: 공격을 이김 · 무기 손상 없음">
             <i class="fas fa-shield-alt mr-1"></i>방어
         </button>
         <button onclick="window.battleAction('evade')" ${evadeDisabled ? 'disabled' : ''}
             class="choice-btn p-3 bg-cyan-900/50 hover:bg-cyan-800 border border-cyan-600 rounded-xl font-bold text-sm
             ${evadeDisabled && !autoDisabled ? 'opacity-40 cursor-not-allowed' : ''}"
-            title="회피 ${evadeRate}%${lowHpBonus ? ` (위기 +${lowHpBonus}%)` : ''} · 스테미나 ${EVADE_STAMINA_COST} 소모">
+            title="묵찌바: 방어를 이김 · ${ngUnlocked ? '회피만' : '성공=회심'} · ${evadeRate}%${lowHpBonus ? ` (위기 +${lowHpBonus}%)` : ''} · 스테미나 ${EVADE_STAMINA_COST}">
             <i class="fas fa-wind mr-1"></i>회피 <span class="text-cyan-200">${evadeRate}%</span>
-            <div class="text-xs font-normal text-cyan-300/80 mt-0.5">${playerBattleStamina}/${BATTLE_STAMINA_MAX} · -${EVADE_STAMINA_COST}</div>
+            <div class="text-xs font-normal text-cyan-300/80 mt-0.5">${getPlayerBattleStamina(gs)}/${gs.maxStamina || BATTLE_STAMINA_MAX} · -${EVADE_STAMINA_COST}</div>
         </button>
         <button onclick="window.battleAction('skill')" ${autoDisabled || !ngUnlocked ? 'disabled' : ''}
             class="choice-btn p-3 bg-orange-900/50 hover:bg-orange-800 border border-orange-600 rounded-xl font-bold text-sm
             ${!ngUnlocked ? 'opacity-40 cursor-not-allowed' : ''}"
-            title="${ngUnlocked ? '내공 15 소모 · 강력' : '내공 미타동 (삼류 중반)'}">
+            title="${ngUnlocked ? '내공 15 소모 · 필살(회심) 역할' : '내공 미타동 (삼류 중반)'}">
             <i class="fas fa-fire mr-1"></i>내공술${!ngUnlocked ? ' 🔒' : ''}
         </button>
         <button onclick="window.battleAction('flee')" ${autoDisabled ? 'disabled' : ''}
@@ -770,152 +854,102 @@ function updateBattleUI() {
     `;
 }
 
+function playExchangeAnims(playerAction, enemyAction, result) {
+    if (playerAction === 'skill') battleSd.playBattleAnim('player', 'skill');
+    else if (playerAction === 'attack') battleSd.playBattleAnim('player', 'attack');
+    else if (playerAction === 'defend') battleSd.playBattleAnim('player', 'defend');
+    else if (playerAction === 'evade') battleSd.playBattleAnim('player', 'evade');
+
+    if (enemyAction === 'attack' || result.enemyDamage > 0) battleSd.playBattleAnim('enemy', result.enemyDamage > 0 ? 'hit' : 'attack');
+    if (result.playerDamage > 0) battleSd.playBattleAnim('player', playerAction === 'defend' ? 'defend' : 'hit');
+}
+
+function mergeEnemyWeaponState(enemy, patch) {
+    if (!patch) return;
+    if (patch.weaponDurability != null) enemy.weaponDurability = patch.weaponDurability;
+    if (patch.weaponBroken != null) enemy.weaponBroken = patch.weaponBroken;
+    if (patch.weaponGrade != null) enemy.weaponGrade = patch.weaponGrade;
+}
+
+function applyExchangeResult(gs, enemy, result) {
+    mergeEnemyWeaponState(enemy, result.enemy);
+    if (result.naegongCost > 0) {
+        state.modifyStats({ naegong: Math.max(0, gs.naegong - result.naegongCost) });
+    }
+    if (result.playerDamage > 0) {
+        state.modifyStats({ hp: Math.max(0, gs.hp - result.playerDamage) });
+    }
+    if (result.enemyDamage > 0) {
+        enemy.hp = Math.max(0, enemy.hp - result.enemyDamage);
+    }
+}
+
 export function playerAction(type) {
-    if (!currentEnemy) return;
+    if (!currentEnemy || battleResolutionPending) return;
     const gs = state.gameState;
     const enemy = currentEnemy;
 
-    startExchange();
-
-    switch (type) {
-        case 'attack':
-            battleSd.playBattleAnim('player', 'attack');
-            applyAttackToEnemy(gs, enemy, 1, '공격');
-            battleSd.playBattleAnim('enemy', 'hit');
-            break;
-        case 'defend': {
-            defending = true;
-            battleSd.playBattleAnim('player', 'defend');
-            logBattle('방어 자세를 취했다.', 'player');
-            enemyTurn();
-            return;
-        }
-        case 'evade': {
-            if (!canEvade(true)) {
-                logBattle(`스테미나가 고갈되어 회피할 수 없다. (${playerBattleStamina}/${EVADE_STAMINA_COST} 필요)`, 'player');
-                enemyTurn();
-                return;
-            }
-            spendEvadeStamina(true);
-            if (rollActiveEvade(gs)) {
-                battleSd.playBattleAnim('player', 'evade');
-                const evMsg = describeEvade(gs, true);
-                if (Math.random() < 0.5) {
-                    logBattle(`${evMsg} → 즉시 반격!`, 'player');
-                    window.setTimeout(() => battleSd.playBattleAnim('player', 'attack'), 280);
-                    applyAttackToEnemy(gs, enemy, COUNTER_DAMAGE_RATIO, '회피 후 반격');
-                    battleSd.playBattleAnim('enemy', 'hit');
-                    if (checkVictoryAfterHit()) return;
-                    updateBattleUI();
-                    return;
-                }
-                logBattle(`${evMsg} → 빈틈 발견! 치명타!`, 'player');
-                window.setTimeout(() => battleSd.playBattleAnim('player', 'attack'), 280);
-                applyAttackToEnemy(gs, enemy, CRITICAL_STRIKE_MULT, '치명타');
-                battleSd.playBattleAnim('enemy', 'hit');
-                if (checkVictoryAfterHit()) return;
-                updateBattleUI();
-                return;
-            }
-            battleSd.playBattleAnim('player', 'evade');
-            logBattle(describeEvade(gs, false), 'player');
-            enemyTurn();
-            return;
-        }
-        case 'skill': {
-            if (!martial.isNaegongUnlocked(gs)) {
-                logBattle('아직 내공이 개통되지 않았다!', 'player');
-                updateBattleUI();
-                return;
-            }
-            if (gs.naegong < 15) {
-                logBattle('내공이 부족하다!', 'player');
-                updateBattleUI();
-                return;
-            }
-            state.modifyStats({ naegong: gs.naegong - 15 });
-            battleSd.playBattleAnim('player', 'skill');
-            const dmg = Math.max(1, gs.atk * 2 - enemy.def + Math.floor(Math.random() * 8));
-            enemy.hp -= dmg;
-            logBattle(`내공술 발동! ${enemy.name}에게 ${dmg} 피해`, 'player');
-            battleSd.playBattleAnim('enemy', 'hit');
-            break;
-        }
-        case 'flee': {
-            const fleeChance = enemy.named ? 0.25 : 0.5;
-            if (Math.random() < fleeChance) {
-                logBattle('도망에 성공했다!', 'player');
-                endBattle(false, false, true);
-                return;
-            }
-            logBattle('도망 실패!', 'player');
-            break;
-        }
-        default:
-            return;
-    }
-
-    if (checkVictoryAfterHit()) return;
-    enemyTurn();
-}
-
-function applyEnemyHitToPlayer(gs, enemy, mult = 1, logPrefix = null) {
-    let dmg = Math.max(1, enemy.atk - gs.def + Math.floor(Math.random() * 4));
-    dmg = Math.max(1, Math.floor(dmg * mult));
-    const prefix = logPrefix || `${enemy.name}의 공격`;
-    if (defending) {
-        dmg = Math.floor(dmg / 2);
-        defending = false;
-        logBattle(`${prefix}! (방어) ${dmg} 피해`, 'enemy');
-    } else {
-        logBattle(`${prefix}! ${dmg} 피해`, 'enemy');
-    }
-    state.modifyStats({ hp: gs.hp - dmg });
-    return dmg;
-}
-
-function checkPlayerDefeatAfterHit() {
-    const gs = state.gameState;
-    if (gs.hp > 0) return false;
-    logBattle('💀 쓰러졌다...', 'system');
-    updateBattleUI();
-    endBattle(false, true);
-    return true;
-}
-
-function enemyTurn() {
-    const gs = state.gameState;
-    const enemy = currentEnemy;
-    const action = pickEnemyAction(enemy, gs);
-
-    if (action === 'evade') {
-        spendEvadeStamina(false);
-        if (rollEnemyActiveEvade(enemy)) {
-            battleSd.playBattleAnim('enemy', 'evade');
-            const evMsg = describeEnemyEvade(enemy, true);
-            if (Math.random() < 0.5) {
-                logBattle(`${evMsg} → ${enemy.name}의 반격!`, 'enemy');
-                window.setTimeout(() => battleSd.playBattleAnim('enemy', 'attack'), 300);
-                applyEnemyHitToPlayer(gs, enemy, COUNTER_DAMAGE_RATIO, `${enemy.name} 회피 후 반격`);
-            } else {
-                logBattle(`${evMsg} → 빈틈을 찔렀다! 치명타!`, 'enemy');
-                window.setTimeout(() => battleSd.playBattleAnim('enemy', 'attack'), 300);
-                applyEnemyHitToPlayer(gs, enemy, CRITICAL_STRIKE_MULT, `${enemy.name} 치명타`);
-            }
-            battleSd.playBattleAnim('player', 'hit');
-            if (checkPlayerDefeatAfterHit()) return;
+    if (type === 'skill') {
+        if (!martial.isNaegongUnlocked(gs)) {
+            logBattle('아직 내공이 개통되지 않았다!', 'player');
             updateBattleUI();
             return;
         }
-        battleSd.playBattleAnim('enemy', 'evade');
-        logBattle(describeEnemyEvade(enemy, false), 'enemy');
+        if (gs.naegong < 15) {
+            logBattle('내공이 부족하다!', 'player');
+            updateBattleUI();
+            return;
+        }
     }
 
-    const wasDefending = defending;
-    battleSd.playBattleAnim('enemy', 'attack');
-    applyEnemyHitToPlayer(gs, enemy);
-    battleSd.playBattleAnim('player', wasDefending ? 'defend' : 'hit');
-    if (checkPlayerDefeatAfterHit()) return;
+    if (type === 'evade' && !canEvade(true)) {
+        logBattle(`스테미나가 고갈되어 회피할 수 없다. (${getPlayerBattleStamina(gs)}/${EVADE_STAMINA_COST} 필요)`, 'player');
+        updateBattleUI();
+        return;
+    }
+
+    startExchange();
+
+    if (type === 'evade') spendEvadeStamina(true);
+
+    const enemyAction = pickEnemyAction(enemy, gs);
+    if (enemyAction === 'evade') spendEvadeStamina(false);
+
+    const result = exchange.resolveExchange(
+        gs,
+        enemy,
+        type,
+        enemyAction,
+        playerHasInitiative,
+        {
+            naegongOk: martial.isNaegongUnlocked(gs) && gs.naegong >= 15,
+            naegongUnlocked: martial.isNaegongUnlocked(gs),
+        },
+    );
+
+    for (const line of result.lines) {
+        logBattle(line.text, line.side);
+    }
+
+    if (result.fleeSuccess === true) {
+        refreshBattleHud();
+        endBattle(false, false, true);
+        return;
+    }
+
+    applyExchangeResult(gs, enemy, result);
+    recordBattleMartialUsage(gs, result, type);
+    playExchangeAnims(type, enemyAction, result);
+    refreshBattleHud();
+
+    if (enemy.hp <= 0) {
+        presentBattleVictory(enemy, type, enemyAction, result);
+        return;
+    }
+    if (gs.hp <= 0) {
+        presentBattleDefeat(gs, type, enemyAction, result);
+        return;
+    }
     updateBattleUI();
 }
 

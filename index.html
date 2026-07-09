@@ -838,7 +838,7 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-5 gap-4 mb-6" id="stats-bar"></div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-3 sm:gap-4 mb-6" id="stats-bar"></div>
 
         <div class="grid grid-cols-12 gap-6">
             <div class="col-span-5">
@@ -906,14 +906,19 @@
                     <div id="travel-risk" class="text-red-400 font-bold text-lg"></div>
                 </div>
             </div>
-            <div class="grid grid-cols-2 gap-2 mb-4 text-sm">
+            <div class="grid grid-cols-3 gap-2 mb-4 text-sm">
+                <div class="bg-zinc-800/60 rounded-lg p-2 text-center">
+                    <div class="text-zinc-500 text-xs">스테미나</div>
+                    <div id="travel-stamina-cost" class="text-lime-400 font-bold text-lg">0 SP</div>
+                    <div class="text-[0.65rem] text-zinc-500">보유 <span id="travel-stamina-current">100/100</span></div>
+                </div>
                 <div class="bg-zinc-800/60 rounded-lg p-2 text-center">
                     <div class="text-zinc-500 text-xs">네임드 조우</div>
                     <div id="travel-named-risk" class="text-amber-400 font-bold">1%</div>
                 </div>
                 <div class="bg-zinc-800/60 rounded-lg p-2 text-center">
-                    <div class="text-zinc-500 text-xs">정보 수집</div>
-                    <div class="text-blue-400 font-bold">66% 성공 · 34% 적</div>
+                    <div class="text-zinc-500 text-xs">탐색·정보</div>
+                    <div class="text-blue-400 font-bold text-xs leading-snug">탐색 -14 · 정보 -12 SP</div>
                 </div>
             </div>
             <p id="travel-kind" class="text-xs text-zinc-600 mb-2 text-center"></p>

@@ -9,6 +9,8 @@ import * as encounters from './encounters.js';
 import * as intel from './intel.js';
 import * as quests from './quests.js';
 import * as inventory from './inventory.js';
+import * as stamina from './stamina.js';
+import * as places from './places.js';
 
 let pendingNamedResolve = null;
 
@@ -319,6 +321,19 @@ function showIntelQuestOffer(result) {
 }
 
 export function gatherIntel() {
+    const gs = state.gameState;
+    const intelAccess = places.canGatherIntel(gs.currentLocation, gs.currentArea);
+    if (!intelAccess.ok) {
+        state.addLog(`📡 ${intelAccess.message}`);
+        ui.updateAllUI();
+        return;
+    }
+    const spend = stamina.trySpendAction('gather', gs);
+    if (!spend.ok) {
+        state.addLog(stamina.staminaBlockedMessage('정보 수집', spend.cost, gs));
+        ui.updateAllUI();
+        return;
+    }
     const result = encounters.rollGatherIntel();
     if (result.type === 'quest_offer') {
         showIntelQuestOffer(result);
@@ -403,12 +418,39 @@ function revealPlaceFromExplore(gs) {
 
 export function exploreLocation() {
     const gs = state.gameState;
+    const spend = stamina.trySpendAction('explore', gs);
+    if (!spend.ok) {
+        state.addLog(stamina.staminaBlockedMessage('주변 탐색', spend.cost, gs));
+        ui.updateAllUI();
+        return;
+    }
     const loc = gs.currentArea;
     tickExploreCooldowns(gs);
     const pool = getExploreEventPool(loc);
 
     gs.currentEvent = null;
     revealPlaceFromExplore(gs);
+
+    const terrain = map.getSpotTile(gs.currentLocation, gs.currentArea) || 'grass';
+    const wildRoll = encounters.rollExploreWildernessEncounter(loc, gs.currentLocation, terrain, gs);
+    if (wildRoll) {
+        const enemy = wildRoll.enemy;
+        const label = enemy.displayName || enemy.name;
+        if (wildRoll.type === 'named') {
+            state.addLog(`🔍 탐색 중 산채 보스 ${label}과 마주쳤다!`);
+            if (!encounters.shouldForceNamedBattle(gs, enemy)) {
+                awaitNamedEncounterChoice(enemy, 'explore');
+                ui.updateAllUI();
+                return;
+            }
+            state.addLog(`🔍 ${encounters.getForcedNamedBattleMessage(gs, enemy)}`);
+        } else {
+            state.addLog(`🔍 탐색 중 ${enemy.name}이(가) 길을 막았다!`);
+        }
+        battle.startBattleFromEnemy(enemy, 'explore');
+        ui.updateAllUI();
+        return;
+    }
 
     if (!pool.length || Math.random() > EXPLORE_EVENT_CHANCE) {
         const msg = EXPLORE_NOTHING_MSGS[Math.floor(Math.random() * EXPLORE_NOTHING_MSGS.length)];
@@ -624,8 +666,9 @@ export function applyTravelDestination(type, targetId) {
 
 /** 직접 이동 (여정 없이, 이벤트·전투 콜백용) */
 export function travelToLocal(spotId) {
-    const area = state.gameState.currentArea;
-    const from = state.gameState.currentLocation;
+    const gs = state.gameState;
+    const area = gs.currentArea;
+    const from = gs.currentLocation;
     if (from === spotId) return;
     if (!map.canTravelLocal(area, from, spotId)) {
         state.addLog('인접하지 않은 곳이다.');
@@ -633,14 +676,22 @@ export function travelToLocal(spotId) {
         return;
     }
     const days = map.getLocalTravelDays(area, from, spotId);
+    const stCost = stamina.getTravelStaminaCost(days, true);
+    if (!stamina.canAfford(stCost, gs)) {
+        state.addLog(stamina.staminaBlockedMessage('이동', stCost, gs));
+        ui.updateAllUI();
+        return;
+    }
+    stamina.spend(stCost, gs);
     state.advanceDays(days, spotId);
     applyTravelDestination('local', spotId);
     ui.updateAllUI();
 }
 
 export function travelToArea(spotId) {
-    const region = state.gameState.currentRegion;
-    const from = state.gameState.currentArea;
+    const gs = state.gameState;
+    const region = gs.currentRegion;
+    const from = gs.currentArea;
     if (from === spotId) return;
     if (!map.canTravelArea(region, from, spotId)) {
         state.addLog(`${spotId}(은)는 인접 거점이 아니다.`);
@@ -648,6 +699,13 @@ export function travelToArea(spotId) {
         return;
     }
     const days = map.getAreaTravelDays(region, from, spotId);
+    const stCost = stamina.getTravelStaminaCost(days, false);
+    if (!stamina.canAfford(stCost, gs)) {
+        state.addLog(stamina.staminaBlockedMessage('이동', stCost, gs));
+        ui.updateAllUI();
+        return;
+    }
+    stamina.spend(stCost, gs);
     state.advanceDays(days, spotId);
     applyTravelDestination('area', spotId);
     ui.updateAllUI();

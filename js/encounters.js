@@ -5,6 +5,8 @@ import * as hero from './hero.js';
 import * as enlightenment from './enlightenment.js';
 import * as quests from './quests.js';
 import * as inventory from './inventory.js';
+import * as map from './map.js';
+import * as stamina from './stamina.js';
 
 export const NAMED_FACTION = {
     RIGHTEOUS: '정파',
@@ -29,6 +31,84 @@ export function getNamedEncounterChance(fame, totalDays) {
 export const GATHER_ENEMY_CHANCE = 0.008;
 /** 정보 수집 적 조우 중 네임드 확률 */
 export const GATHER_NAMED_CHANCE = 0.03;
+
+/** 숲·산·험지 조우 — 주기별 총량 제한 (문파 대련과 유사) */
+export const WILDERNESS_CYCLE_DAYS = 7;
+
+export const WILDERNESS_TERRAIN = {
+    forest:   { mult: 3.6, explore: 0.24, limit: 4, label: '숲' },
+    mountain: { mult: 4.2, explore: 0.28, limit: 5, label: '산악' },
+    danger:   { mult: 4.8, explore: 0.32, limit: 5, label: '험지' },
+    grass:    { mult: 1.3, explore: 0.08, limit: 2, label: '평원' },
+    road:     { mult: 1.6, explore: 0.10, limit: 2, label: '길' },
+};
+
+const WILDERNESS_BANDIT_POOL = {
+    weak: [
+        { name: '초보 산적', hp: 30, atk: 8, def: 3 },
+        { name: '길거리 도적', hp: 34, atk: 9, def: 3 },
+        { name: '겁쟁이 산적', hp: 28, atk: 7, def: 2 },
+    ],
+    normal: [
+        { name: '산적', hp: 42, atk: 11, def: 4 },
+        { name: '강호 도적', hp: 48, atk: 12, def: 5 },
+        { name: '도적대원', hp: 44, atk: 10, def: 5 },
+    ],
+    strong: [
+        { name: '산적 두목 부하', hp: 56, atk: 14, def: 7 },
+        { name: '흉포한 도적', hp: 58, atk: 15, def: 6 },
+        { name: '산길 맹수', hp: 50, atk: 16, def: 4 },
+    ],
+};
+
+/** 산채 보스 — 네임드급 보상 */
+export const WILDERNESS_BOSSES = [
+    {
+        id: 'bandit_chief_geomgak',
+        name: '검각 산적두목',
+        title: '관문 산채 우두머리',
+        icon: '🗡️',
+        hp: 125, atk: 21, def: 10,
+        fameReward: 14, expReward: 38, goldReward: 48,
+        itemPool: ['철검', '호신갑'],
+        areas: ['검각관'],
+        locations: ['산적소굴', '검각관', null],
+        terrains: ['danger', 'mountain'],
+        spawnMinKills: 4,
+        faction: NAMED_FACTION.DEMONIC,
+        defeatFlag: 'defeatedBanditChiefGeomgak',
+    },
+    {
+        id: 'forest_rogue_chief',
+        name: '숲적두',
+        title: '약초원 산적',
+        icon: '🌲',
+        hp: 105, atk: 18, def: 9,
+        fameReward: 11, expReward: 32, goldReward: 38,
+        itemPool: ['낡은단도', '영초'],
+        areas: ['촉남촌'],
+        locations: ['약초원', '숲길', null],
+        terrains: ['forest'],
+        spawnMinKills: 3,
+        faction: NAMED_FACTION.DEMONIC,
+        defeatFlag: 'defeatedForestRogueChief',
+    },
+    {
+        id: 'mountain_bandit_lord',
+        name: '산채호법',
+        title: '산길 도적두목',
+        icon: '⛰️',
+        hp: 118, atk: 20, def: 11,
+        fameReward: 13, expReward: 36, goldReward: 42,
+        itemPool: ['쇠봉', '내공단'],
+        areas: ['청성산'],
+        locations: ['산길', '숲속', null],
+        terrains: ['mountain', 'forest'],
+        spawnMinKills: 4,
+        faction: NAMED_FACTION.DEMONIC,
+        defeatFlag: 'defeatedMountainBanditLord',
+    },
+];
 /** 일반 전투 승리 시 아이템 */
 export const NORMAL_ITEM_DROP_CHANCE = 0.08;
 /** 산적·도적 처치 시 하급 무기 드롭 */
@@ -238,6 +318,199 @@ export function applyNamedSparRewards(enemy, opts = {}) {
     };
 }
 
+export function isWildernessTerrain(tile) {
+    return tile === 'forest' || tile === 'mountain' || tile === 'danger';
+}
+
+export function getWildernessTerrainConfig(tile) {
+    if (WILDERNESS_TERRAIN[tile]) return WILDERNESS_TERRAIN[tile];
+    if (tile === 'city' || tile === 'village' || tile === 'sect' || tile === 'water') return null;
+    return WILDERNESS_TERRAIN.road;
+}
+
+export function supportsWildernessEncounters(tile) {
+    if (!tile) return false;
+    if (tile === 'city' || tile === 'village' || tile === 'sect' || tile === 'water') return false;
+    return isWildernessTerrain(tile) || tile === 'grass' || tile === 'road';
+}
+
+export function getWildernessThreatKey(area, location = '*') {
+    return `${area}:${location || '*'}`;
+}
+
+function initWildernessThreat(gs) {
+    if (!gs.wildernessThreat) gs.wildernessThreat = {};
+}
+
+function syncWildernessThreat(gs, key) {
+    initWildernessThreat(gs);
+    let threat = gs.wildernessThreat[key];
+    if (!threat) {
+        threat = {
+            weakKills: 0,
+            normalKills: 0,
+            strongKills: 0,
+            encounters: 0,
+            cycleStartDay: gs.day,
+        };
+        gs.wildernessThreat[key] = threat;
+        return threat;
+    }
+    if (gs.day - (threat.cycleStartDay ?? gs.day) >= WILDERNESS_CYCLE_DAYS) {
+        threat.encounters = 0;
+        threat.cycleStartDay = gs.day;
+    }
+    return threat;
+}
+
+export function getWildernessEncounterAccess(area, location, terrain, gs = state.gameState) {
+    const cfg = getWildernessTerrainConfig(terrain);
+    if (!cfg) return { ok: false, reason: 'safe', used: 0, limit: 0, daysUntilReset: 0, threat: null, key: null };
+    const key = getWildernessThreatKey(area, location);
+    const threat = syncWildernessThreat(gs, key);
+    const used = threat.encounters || 0;
+    const daysLeft = Math.max(0, WILDERNESS_CYCLE_DAYS - (gs.day - (threat.cycleStartDay ?? gs.day)));
+    if (used >= cfg.limit) {
+        return {
+            ok: false,
+            reason: 'limit',
+            used,
+            limit: cfg.limit,
+            daysUntilReset: daysLeft || WILDERNESS_CYCLE_DAYS,
+            threat,
+            key,
+        };
+    }
+    return { ok: true, used, limit: cfg.limit, daysUntilReset: daysLeft, threat, key };
+}
+
+function getWildernessTierWeights(threat) {
+    const wk = threat.weakKills || 0;
+    const nk = threat.normalKills || 0;
+    let weak = Math.max(0, 62 - wk * 14);
+    let normal = 28 + Math.min(wk * 9, 38) + Math.min(nk * 4, 12);
+    let strong = 5 + Math.min(wk * 3, 12) + Math.min(nk * 9, 28);
+    if (wk >= 5) weak = 0;
+    if (wk >= 3 && nk >= 2) normal = Math.max(normal, 42);
+    if (wk + nk >= 6) strong = Math.max(strong, 22);
+    const total = weak + normal + strong || 1;
+    return { weak: weak / total, normal: normal / total, strong: strong / total };
+}
+
+function pickWildernessTier(threat) {
+    const w = getWildernessTierWeights(threat);
+    const roll = Math.random();
+    if (roll < w.weak) return 'weak';
+    if (roll < w.weak + w.normal) return 'normal';
+    return 'strong';
+}
+
+function scaleWildernessTier(enemy, tier, gs = state.gameState) {
+    const table = {
+        weak:   { hp: 0.74, atk: 0.76, def: 0.78, lv: -1 },
+        normal: { hp: 0.96, atk: 0.98, def: 0.94, lv: 0 },
+        strong: { hp: 1.14, atk: 1.12, def: 1.08, lv: 1 },
+    };
+    const m = table[tier] || table.normal;
+    const hp = Math.max(8, Math.floor(gs.maxHp * m.hp));
+    const atk = Math.max(4, Math.floor(gs.atk * m.atk));
+    const def = Math.max(1, Math.floor(gs.def * m.def));
+    const level = Math.max(1, gs.level + m.lv);
+    return { ...enemy, hp, maxHp: hp, atk, def, level, wildernessTier: tier };
+}
+
+export function pickWildernessEnemy(area, location, terrain, gs = state.gameState) {
+    const key = getWildernessThreatKey(area, location);
+    const threat = syncWildernessThreat(gs, key);
+    const tier = pickWildernessTier(threat);
+    const pool = WILDERNESS_BANDIT_POOL[tier];
+    const raw = { ...pool[Math.floor(Math.random() * pool.length)] };
+    const enemy = scaleWildernessTier(raw, tier, gs);
+    return {
+        ...enemy,
+        wildernessKey: key,
+        wildernessTier: tier,
+        wildernessTerrain: terrain,
+        faction: '사파',
+    };
+}
+
+function canSpawnWildernessBoss(raw, area, location, terrain, gs) {
+    if (raw.defeatFlag && gs[raw.defeatFlag]) return false;
+    if (!raw.areas?.includes(area)) return false;
+    if (raw.locations?.length && !raw.locations.includes(location) && !raw.locations.includes(null)) return false;
+    if (raw.terrains?.length && !raw.terrains.includes(terrain)) return false;
+    const key = getWildernessThreatKey(area, location);
+    const threat = syncWildernessThreat(gs, key);
+    const totalKills = (threat.weakKills || 0) + (threat.normalKills || 0) + (threat.strongKills || 0);
+    return totalKills >= (raw.spawnMinKills || 4);
+}
+
+export function pickWildernessBoss(area, location, terrain, gs = state.gameState) {
+    const pool = WILDERNESS_BOSSES.filter(b => canSpawnWildernessBoss(b, area, location, terrain, gs));
+    if (!pool.length) return null;
+    const raw = pool[Math.floor(Math.random() * pool.length)];
+    const boss = buildNamedEnemy(raw);
+    return {
+        ...boss,
+        wildernessBoss: true,
+        wildernessKey: getWildernessThreatKey(area, location),
+        icon: raw.icon,
+    };
+}
+
+export function recordWildernessEncounter(area, location, gs = state.gameState) {
+    const key = getWildernessThreatKey(area, location);
+    const threat = syncWildernessThreat(gs, key);
+    threat.encounters = (threat.encounters || 0) + 1;
+}
+
+export function recordWildernessVictory(enemy, gs = state.gameState) {
+    if (!enemy?.wildernessKey) return;
+    const threat = syncWildernessThreat(gs, enemy.wildernessKey);
+    if (enemy.wildernessBoss || enemy.named) return;
+    const tier = enemy.wildernessTier || 'normal';
+    if (tier === 'weak') threat.weakKills = (threat.weakKills || 0) + 1;
+    else if (tier === 'strong') threat.strongKills = (threat.strongKills || 0) + 1;
+    else threat.normalKills = (threat.normalKills || 0) + 1;
+}
+
+export function getWildernessTravelChance(fame, totalDays, terrain) {
+    const cfg = getWildernessTerrainConfig(terrain);
+    if (!cfg) return getTravelEncounterChance(fame, totalDays);
+    const base = getTravelEncounterChance(fame, totalDays);
+    return Math.min(0.32, Math.max(0.08, base * cfg.mult));
+}
+
+export function formatWildernessRisk(area, location, terrain, totalDays, gs = state.gameState) {
+    if (!supportsWildernessEncounters(terrain)) return null;
+    const cfg = getWildernessTerrainConfig(terrain);
+    const access = getWildernessEncounterAccess(area, location, terrain, gs);
+    const pct = Math.round(getWildernessTravelChance(gs.fame, totalDays, terrain) * 100);
+    const quota = access.ok
+        ? `${access.used}/${access.limit}회`
+        : `한도 소진 (${access.used}/${access.limit} · ${access.daysUntilReset}일 후)`;
+    return `${cfg.label} 산적·도적 ${pct}% · ${WILDERNESS_CYCLE_DAYS}일간 ${quota}`;
+}
+
+export function rollExploreWildernessEncounter(area, location, terrain, gs = state.gameState) {
+    if (!supportsWildernessEncounters(terrain)) return null;
+    const cfg = getWildernessTerrainConfig(terrain);
+    const access = getWildernessEncounterAccess(area, location, terrain, gs);
+    if (!access.ok || !cfg) return null;
+    if (Math.random() >= cfg.explore) return null;
+
+    const boss = pickWildernessBoss(area, location, terrain, gs);
+    if (boss && Math.random() < 0.22) {
+        recordWildernessEncounter(area, location, gs);
+        return { type: 'named', enemy: boss };
+    }
+
+    const enemy = pickWildernessEnemy(area, location, terrain, gs);
+    recordWildernessEncounter(area, location, gs);
+    return { type: 'normal', enemy };
+}
+
 export function pickGatherEnemy() {
     const pool = [
         { name: '산적', hp: 42, atk: 10, def: 4 },
@@ -250,11 +523,38 @@ export function pickGatherEnemy() {
     return scaleEnemyForBattle(e, state.gameState, { profile });
 }
 
-export function rollTravelEncounter(fame, totalDays, area) {
+export function rollTravelEncounter(fame, totalDays, area, opts = {}) {
+    const gs = state.gameState;
+    const terrain = opts.terrain || 'road';
+    const location = opts.location ?? area;
+    const useWilderness = supportsWildernessEncounters(terrain);
+    const access = useWilderness
+        ? getWildernessEncounterAccess(area, location, terrain, gs)
+        : { ok: false };
+
+    if (access.ok && useWilderness) {
+        const boss = pickWildernessBoss(area, location, terrain, gs);
+        if (boss && Math.random() < 0.18) {
+            recordWildernessEncounter(area, location, gs);
+            return { type: 'named', enemy: boss };
+        }
+    }
+
     if (Math.random() < getNamedEncounterChance(fame, totalDays)) {
         const named = pickNamedEnemy(area);
         if (named) return { type: 'named', enemy: named };
     }
+
+    if (access.ok && useWilderness) {
+        const chance = getWildernessTravelChance(fame, totalDays, terrain);
+        if (Math.random() < chance) {
+            const enemy = pickWildernessEnemy(area, location, terrain, gs);
+            recordWildernessEncounter(area, location, gs);
+            return { type: 'normal', enemy };
+        }
+        return null;
+    }
+
     if (Math.random() < getTravelEncounterChance(fame, totalDays)) {
         return { type: 'normal', enemy: pickTravelEnemy(totalDays, fame) };
     }
@@ -477,6 +777,9 @@ export function applyEarlyDifficulty(enemy, gs = state.gameState) {
 /** 전투 시작 시 적 유형별 스케일 */
 export function scaleEnemyForBattle(enemy, gs = state.gameState, opts = {}) {
     if (!enemy) return enemy;
+    if (enemy.wildernessBoss || enemy.wildernessTier) {
+        return enemy.named ? scaleNamedEnemy(enemy, gs) : enemy;
+    }
     const profile = opts.profile || inferEnemyProfile(enemy, opts.context);
 
     switch (profile) {
@@ -567,10 +870,12 @@ export function applyNamedVictoryRewards(enemy, opts = {}) {
         naegongResult,
         martialExpGain: martialResult.gain,
         martialLevelUps: martialResult.levelUps,
+        martialByArt: martialResult.byArt,
     };
 }
 
 export function applyNormalVictoryRewards(enemy, opts = {}) {
+    recordWildernessVictory(enemy);
     const exp = calcBattleExp((enemy.maxHp || enemy.hp) / 5, opts.manual);
     state.gainExp(exp.total);
     state.modifyStats({
@@ -594,6 +899,7 @@ export function applyNormalVictoryRewards(enemy, opts = {}) {
         naegongResult,
         martialExpGain: martialResult.gain,
         martialLevelUps: martialResult.levelUps,
+        martialByArt: martialResult.byArt,
     };
 }
 
@@ -602,6 +908,7 @@ export function rollGatherIntel() {
     const gs = state.gameState;
     intel.initIntel(gs);
     gs.day += 1;
+    stamina.onDayAdvanced(gs);
     import('./sects.js').then(s => s.onDayAdvanced(gs, 'intel'));
     gs.intelGatherAttempts += 1;
 
@@ -611,6 +918,15 @@ export function rollGatherIntel() {
         if (Math.random() < GATHER_NAMED_CHANCE) {
             const named = pickNamedEnemy(gs.currentArea);
             if (named) return { type: 'named', enemy: named, successRate };
+        }
+        const gatherTerrain = map.getSpotTile(gs.currentLocation, gs.currentArea) || 'grass';
+        if (supportsWildernessEncounters(gatherTerrain)) {
+            const access = getWildernessEncounterAccess(gs.currentArea, gs.currentLocation, gatherTerrain, gs);
+            if (access.ok) {
+                const enemy = pickWildernessEnemy(gs.currentArea, gs.currentLocation, gatherTerrain, gs);
+                recordWildernessEncounter(gs.currentArea, gs.currentLocation, gs);
+                return { type: 'battle', enemy, successRate };
+            }
         }
         return { type: 'battle', enemy: pickGatherEnemy(), successRate };
     }

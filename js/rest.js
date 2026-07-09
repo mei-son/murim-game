@@ -3,6 +3,7 @@ import * as martial from './martial.js';
 import * as ui from './ui.js';
 import * as places from './places.js';
 import * as sects from './sects.js';
+import * as stamina from './stamina.js';
 
 /** 노숙 — 체력만, 낮은 회복 */
 const CAMP = { hpRate: 0.22, ngRate: 0, oneStat: true, cost: 0, days: 1 };
@@ -67,12 +68,6 @@ function getInnCost(gs) {
     return INN_COST[profile.scale] ?? 12;
 }
 
-function getSectLodgingNeed(tier) {
-    if (tier === '본문') return 15;
-    if (tier === '분파') return 28;
-    return 40;
-}
-
 /** 기연 숙소 — 특정 명승·산중 거점 */
 export function canKiyeonRest(gs) {
     return KIYEON_SPOTS.has(gs.currentLocation);
@@ -106,7 +101,7 @@ export function getSectLodgingOption(gs) {
         const sect = sects.getSect(sectId);
         if (!sect) continue;
         const aff = sects.getAffinity(sectId);
-        const need = getSectLodgingNeed(sect.tier);
+        const need = sects.getSectLodgingNeed(sect.tier);
         if (aff < need || aff <= 0) continue;
         if (!best || aff > best.aff) {
             best = { sectId, sect, aff, need, cost: SECT_LODGE_AFFINITY_COST };
@@ -127,7 +122,7 @@ export function getRestOptions(gs) {
         icon: '🌙',
         label: '노숙',
         desc: '체력만 약간 회복 (무료)',
-        detail: `회복률 ${Math.round(CAMP.hpRate * 100)}% · 1일`,
+        detail: `회복률 ${Math.round(CAMP.hpRate * 100)}% · 스테미나 +${stamina.STAMINA_RESTORE.camp} · 1일`,
         cost: 0,
     }];
 
@@ -138,7 +133,7 @@ export function getRestOptions(gs) {
             icon: '🏨',
             label: '숙박',
             desc: '주막·여관에서 하룻밤',
-            detail: `체력·내공 ${Math.round(INN.hpRate * 100)}% 회복 · ${cost}냥 · 1일`,
+            detail: `체력·내공 ${Math.round(INN.hpRate * 100)}% · 스테미나 +${stamina.STAMINA_RESTORE.inn} · ${cost}냥 · 1일`,
             cost,
         });
     }
@@ -149,8 +144,8 @@ export function getRestOptions(gs) {
             id: 'sect',
             icon: lodging.sect.icon,
             label: `${lodging.sect.name} 숙박`,
-            desc: `우호 ${lodging.aff} — 문파 초대 숙소`,
-            detail: `전폭 회복 · 경험치 · 우호 -${lodging.cost} · 1일`,
+            desc: `${sects.formatAffinityRequirement(lodging.need)} — 문파 초대 숙소`,
+            detail: `전폭 회복 · 경험치 · 교분 -${lodging.cost} · 1일`,
             cost: 0,
             sectId: lodging.sectId,
         });
@@ -191,9 +186,11 @@ export function performRest(type, sectId) {
             return;
         }
         applyRecovery(gs, CAMP);
+        stamina.restore(stamina.STAMINA_RESTORE.camp, gs);
         gs.day += CAMP.days;
         sects.onDayAdvanced(gs, 'rest');
-        state.addLog(`🌙 길에서 노숙. 체력만 ${Math.round(CAMP.hpRate * 100)}% 회복 (제 ${gs.day}일)`);
+        stamina.onDayAdvanced(gs);
+        state.addLog(`🌙 길에서 노숙. 체력 ${Math.round(CAMP.hpRate * 100)}% · 스테미나 +${stamina.STAMINA_RESTORE.camp} (제 ${gs.day}일)`);
         closeRestMenu();
         ui.updateAllUI();
         return;
@@ -212,9 +209,11 @@ export function performRest(type, sectId) {
         }
         state.modifyStats({ gold: gs.gold - cost });
         applyRecovery(gs, INN);
+        stamina.restore(stamina.STAMINA_RESTORE.inn, gs);
         gs.day += INN.days;
         sects.onDayAdvanced(gs, 'rest');
-        state.addLog(`🏨 숙박하여 하룻밤. 체력·내공 ${Math.round(INN.hpRate * 100)}% 회복 (${cost}냥, 제 ${gs.day}일)`);
+        stamina.onDayAdvanced(gs);
+        state.addLog(`🏨 숙박하여 하룻밤. 체력·내공 ${Math.round(INN.hpRate * 100)}% · 스테미나 +${stamina.STAMINA_RESTORE.inn} (${cost}냥, 제 ${gs.day}일)`);
         closeRestMenu();
         ui.updateAllUI();
         return;
@@ -234,10 +233,12 @@ export function performRest(type, sectId) {
             return;
         }
         applyRecovery(gs, PREMIUM, true);
+        stamina.restoreFull(gs);
         gs.day += PREMIUM.days;
         sects.onDayAdvanced(gs, 'rest');
+        stamina.onDayAdvanced(gs);
         state.gainExp(PREMIUM.exp + gs.level * 2);
-        state.addLog(`🏠 ${sect.name} 초대 숙박. 전폭 회복·경험치 (우호 -${spent}, ${sects.getAffinityLabel(next).label}, 제 ${gs.day}일)`);
+        state.addLog(`🏠 ${sect.name} 초대 숙박. 전폭 회복·스테미나 만충 (교분 -${spent} → ${sects.getAffinityLabel(next).label} ${next}, 제 ${gs.day}일)`);
         closeRestMenu();
         ui.updateAllUI();
         return;
@@ -257,9 +258,11 @@ export function performRest(type, sectId) {
             doPremiumRest('✨ 기연 숙소에서 몸과 심법이 한층 깊어졌다.', { firstKiyeon: true });
         } else {
             applyRecovery(gs, PREMIUM, true);
+            stamina.restoreFull(gs);
             gs.day += PREMIUM.days;
             sects.onDayAdvanced(gs, 'rest');
-            state.addLog(`✨ 기연 숙소에서 몸을 추스렸다. (제 ${gs.day}일)`);
+            stamina.onDayAdvanced(gs);
+            state.addLog(`✨ 기연 숙소에서 몸을 추스렸다. 스테미나 만충 (제 ${gs.day}일)`);
         }
         closeRestMenu();
         ui.updateAllUI();
@@ -269,8 +272,10 @@ export function performRest(type, sectId) {
 function doPremiumRest(logText, { firstKiyeon = true } = {}) {
     const gs = state.gameState;
     applyRecovery(gs, PREMIUM, true);
+    stamina.restoreFull(gs);
     gs.day += PREMIUM.days;
     sects.onDayAdvanced(gs, 'rest');
+    stamina.onDayAdvanced(gs);
     if (firstKiyeon) {
         state.gainExp(PREMIUM.exp + gs.level * 3);
         const martialUps = martial.gainMartialEnlightenmentExp(32 + gs.level * 3);

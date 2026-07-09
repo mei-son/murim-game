@@ -14,6 +14,7 @@ export const TIER_META = {
 /**
  * 무공 정의
  * - 검법: 공격(대미지)·방어
+ * - 권법: 맨손 공격·방어 (무명 권각법 등)
  * - 보법: 공격·회피 (전반 보정)
  * - learnable: common(흔함) | kiyeon(기연·문파 등)
  */
@@ -30,6 +31,19 @@ export const MARTIAL_CATALOG = {
         maxLevel: 10,
         potentialMax: 10,
         perLevel: { atk: 1, def: 1 },
+    },
+    gwongak_basic: {
+        id: 'gwongak_basic',
+        name: '무명 권각법',
+        type: '권법',
+        tier: '하류',
+        icon: '👊',
+        learnable: 'common',
+        desc: '이름 없는 행인들이 익히는 하급 권·각 무공. 삼재검법과 함께 강호 입문의 기본이다.',
+        effectDesc: '맨손 공격·방어 보정',
+        maxLevel: 10,
+        potentialMax: 10,
+        perLevel: { atk: 1, def: 0.5 },
     },
     ohaeng_step: {
         id: 'ohaeng_step',
@@ -188,6 +202,7 @@ const BASE_EVASION = 5;
 export function getDefaultLearned() {
     return [
         { id: 'samjae_sword', level: 1, exp: 0 },
+        { id: 'gwongak_basic', level: 1, exp: 0 },
         { id: 'ohaeng_step', level: 1, exp: 0 },
     ];
 }
@@ -195,6 +210,8 @@ export function getDefaultLearned() {
 export function initMartialArts(gs = state.gameState) {
     if (!gs.martialArts?.learned?.length) {
         gs.martialArts = { learned: getDefaultLearned() };
+    } else if (!gs.martialArts.learned.some(a => a.id === 'gwongak_basic')) {
+        gs.martialArts.learned.push({ id: 'gwongak_basic', level: 1, exp: 0 });
     }
     if (!gs.hero) {
         gs.hero = {
@@ -230,9 +247,48 @@ export function calcMartialVictoryExp(enemy, opts = {}) {
 }
 
 export function applyMartialVictoryExp(enemy, opts = {}) {
-    const gain = calcMartialVictoryExp(enemy, opts);
-    const levelUps = gainMartialEnlightenmentExp(gain);
-    return { gain, levelUps };
+    const gs = state.gameState;
+    const victoryGain = calcMartialVictoryExp(enemy, opts);
+    const usageMap = opts.usageMap || {};
+    const usageTotal = Object.values(usageMap).reduce((a, b) => a + b, 0);
+    const levelUps = [];
+    const byArt = {};
+
+    if (usageTotal > 0) {
+        for (const [artId, acc] of Object.entries(usageMap)) {
+            const entry = gs.martialArts?.learned?.find(a => a.id === artId);
+            const def = getArtDef(artId);
+            if (!entry || !def) continue;
+            const bonus = Math.max(1, Math.floor(victoryGain * (acc / usageTotal)));
+            const total = acc + bonus;
+            byArt[artId] = total;
+            levelUps.push(...applyMartialExp(entry, def, total));
+        }
+        recalcCombatStats(gs);
+        const gain = Object.values(byArt).reduce((a, b) => a + b, 0);
+        return { gain, levelUps, byArt };
+    }
+
+    const levelUpsFallback = gainMartialEnlightenmentExp(victoryGain);
+    return { gain: victoryGain, levelUps: levelUpsFallback, byArt: null };
+}
+
+/** 한 합 전투에서 사용한 무공별 숙련 누적 */
+export function accumulateBattleMartialUsage(usageMap, style, result, action) {
+    if (!style?.artId || !usageMap) return;
+    if (action === 'flee') return;
+
+    let gain = 3;
+    if (action === 'defend') gain = 1;
+    else if (action === 'evade') gain = 4;
+    else if (action === 'skill') gain = 6;
+    else gain = 4;
+
+    if (result?.enemyDamage > 0) {
+        gain += Math.min(6, Math.floor(result.enemyDamage / 4));
+    }
+
+    usageMap[style.artId] = (usageMap[style.artId] || 0) + gain;
 }
 
 export function gainMartialEnlightenmentExp(totalExp) {
@@ -322,6 +378,108 @@ export function getMartialBonuses(gs = state.gameState) {
         evasion += entry.bonuses.evasion;
     }
     return { atk, def, evasion };
+}
+
+function pickBestArt(gs, type) {
+    return getLearnedArts(gs)
+        .filter(a => a.def.type === type)
+        .sort((a, b) => b.level - a.level || (TIER_META[b.def.tier]?.rank ?? 0) - (TIER_META[a.def.tier]?.rank ?? 0))[0] || null;
+}
+
+const STYLE_FLAVOR = {
+    검법: ['검막이 일섬처럼 뻗는다', '검기가 호흡과 함께 흐른다', '검끝이 허를 찌른다'],
+    권법: ['권각이 연속으로 터진다', '주먹이 바람을 가른다', '각법이 허를 찔렀다'],
+    보법: ['발끝이 바람처럼 닿는다', '몸이 나비처럼 비껴간다', '보법에 맞춰 권이 이어진다'],
+    fallback: ['거친 난투로 밀어붙인다', '맨몸으로 맞받아친다'],
+};
+
+/**
+ * 무기 장착 여부에 따른 전투 스타일
+ * - 무기 있음: 최고 검법 (삼재검법 등)
+ * - 맨손: 최고 권법 (무명 권각법 등)
+ */
+export function getPlayerCombatStyle(gs, armed = true) {
+    const sword = pickBestArt(gs, '검법');
+    const kwon = pickBestArt(gs, '권법');
+    const step = pickBestArt(gs, '보법');
+
+    if (armed) {
+        if (sword) {
+            return {
+                mode: 'armed',
+                artId: sword.def.id,
+                artName: sword.def.name,
+                artType: '검법',
+                label: sword.def.name,
+                atkMult: 1,
+                bonusAtk: Math.floor(sword.level * 0.4),
+                flavorPool: STYLE_FLAVOR.검법,
+            };
+        }
+        return {
+            mode: 'armed',
+            artId: null,
+            artName: '무기술',
+            artType: '무기',
+            label: '무기술',
+            atkMult: 1,
+            bonusAtk: 0,
+            flavorPool: STYLE_FLAVOR.fallback,
+        };
+    }
+
+    if (kwon) {
+        const stepBonus = step ? Math.floor(step.bonuses.evasion * 0.15) : 0;
+        return {
+            mode: 'unarmed',
+            artId: kwon.def.id,
+            artName: kwon.def.name,
+            artType: '권법',
+            label: kwon.def.name,
+            atkMult: 0.9,
+            bonusAtk: Math.floor(kwon.bonuses.atk * 0.5 + kwon.level * 0.4) + stepBonus,
+            flavorPool: STYLE_FLAVOR.권법,
+        };
+    }
+    if (step) {
+        return {
+            mode: 'unarmed',
+            artId: step.def.id,
+            artName: step.def.name,
+            artType: '보법',
+            label: step.def.name,
+            atkMult: 0.85,
+            bonusAtk: Math.floor(step.bonuses.atk * 0.5 + step.level * 0.4),
+            flavorPool: STYLE_FLAVOR.보법,
+        };
+    }
+    if (sword) {
+        return {
+            mode: 'unarmed',
+            artId: sword.def.id,
+            artName: sword.def.name,
+            artType: '검법',
+            label: `${sword.def.name} 수법`,
+            atkMult: 0.78,
+            bonusAtk: Math.floor(sword.bonuses.atk * 0.45),
+            flavorPool: STYLE_FLAVOR.검법,
+        };
+    }
+    return {
+        mode: 'unarmed',
+        artId: null,
+        artName: '난투',
+        artType: '난투',
+        label: '맨손 난투',
+        atkMult: 0.62,
+        bonusAtk: 0,
+        flavorPool: STYLE_FLAVOR.fallback,
+    };
+}
+
+export function rollCombatFlavor(style) {
+    const pool = style?.flavorPool || STYLE_FLAVOR.fallback;
+    return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export function getEvasionRate(gs = state.gameState) {
@@ -414,7 +572,7 @@ export function grantMartialExpToArts(artIds, totalExp, gs = state.gameState) {
 
 export function formatArtBonuses(bonuses, def) {
     const parts = [];
-    if (def.type === '검법') {
+    if (def.type === '검법' || def.type === '권법') {
         if (bonuses.atk) parts.push(`공격+${bonuses.atk}`);
         if (bonuses.def) parts.push(`방어+${bonuses.def}`);
     } else {
@@ -433,7 +591,7 @@ export function renderMartialArtsPanel(gs = state.gameState) {
         const tier = TIER_META[def.tier] || TIER_META.하류;
         const expNeed = getMartialExpToLevel(level);
         const expPct = Math.min(100, Math.floor((exp / expNeed) * 100));
-        const perLv = def.type === '검법'
+        const perLv = (def.type === '검법' || def.type === '권법')
             ? `공격+${def.perLevel.atk || 0} · 방어+${def.perLevel.def || 0}`
             : `공격+${def.perLevel.atk || 0} · 회피+${def.perLevel.evasion || 0}`;
         return `
