@@ -48,7 +48,7 @@ export const ITEMS = {
         type: 'gear', slot: 'weapon', grade: 'common', atk: 1,
     },
     '철검': {
-        id: '철검', name: '철검', icon: '🗡️', desc: '공격력 +2',
+        id: '철검', name: '낡은 철검', icon: '🗡️', desc: '공격력 +2',
         type: 'gear', slot: 'weapon', grade: 'common', atk: 2,
     },
     '쇠봉': {
