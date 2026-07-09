@@ -861,7 +861,14 @@ function playExchangeAnims(playerAction, enemyAction, result) {
     else if (playerAction === 'evade') battleSd.playBattleAnim('player', 'evade');
 
     if (enemyAction === 'attack' || result.enemyDamage > 0) battleSd.playBattleAnim('enemy', result.enemyDamage > 0 ? 'hit' : 'attack');
-    if (result.playerDamage > 0) battleSd.playBattleAnim('player', playerAction === 'defend' ? 'defend' : 'hit');
+    if (result.playerDamage > 0) {
+        if (playerAction === 'defend') battleSd.playBattleAnim('player', 'defend');
+        else if (playerAction === 'attack' || playerAction === 'skill') {
+            battleSd.playBattleAnim('player', 'hit', { pose: 'attack' });
+        } else {
+            battleSd.playBattleAnim('player', 'hit');
+        }
+    }
 }
 
 function mergeEnemyWeaponState(enemy, patch) {

@@ -141,12 +141,12 @@ export function mountBattleSprites(enemy) {
     }
 }
 
-export function playBattleAnim(side, action) {
+export function playBattleAnim(side, action, opts = {}) {
     const id = side === 'player' ? 'player-battle-sd' : 'enemy-battle-sd';
     const el = document.getElementById(id);
     if (!el || !action) return;
 
-    const pose = POSE_BY_ACTION[action] || 'idle';
+    const pose = opts.pose || POSE_BY_ACTION[action] || 'idle';
     setBattlePose(side, pose);
 
     if (animTimers[side]) window.clearTimeout(animTimers[side]);
