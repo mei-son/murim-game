@@ -494,7 +494,7 @@
             margin: 0 auto;
         }
 
-        /* 주인공 도트화 테스트 — nearest-neighbor 픽셀 크러시 (주인공만) */
+        /* 주인공 도트 스프라이트 — assets/hero-dot/ 정수 배율 표시 (주인공만) */
         .hero-dot-badge {
             display: none;
             align-items: center;
@@ -508,59 +508,49 @@
             background: rgba(20, 83, 45, 0.55);
             border: 1px solid rgba(74, 222, 128, 0.45);
         }
+        body.hero-dot-test { --hero-dot-scale: 2; --hero-dot-w: 68px; --hero-dot-h: 52px; }
         body.hero-dot-test .hero-dot-badge { display: inline-flex; }
 
         body.hero-dot-test .sd-hero-dot-avatar {
-            display: inline-block;
-            position: relative;
-            width: 5rem;
-            height: 6.5rem;
-            overflow: hidden;
+            display: inline-flex;
+            align-items: flex-end;
+            justify-content: center;
+            width: calc(var(--hero-dot-w) * var(--hero-dot-scale));
+            height: calc(var(--hero-dot-h) * var(--hero-dot-scale));
             flex-shrink: 0;
         }
         body.hero-dot-test .sd-hero-dot-avatar--lg {
-            width: 6.25rem;
-            height: 8.1rem;
+            --hero-dot-scale: 2.5;
             margin: 0 auto;
         }
         body.hero-dot-test .sd-hero-sprite--dot {
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            width: 25%;
-            height: 25%;
-            margin-left: -12.5%;
-            object-fit: contain;
+            width: var(--hero-dot-w);
+            height: var(--hero-dot-h);
+            object-fit: fill;
             object-position: bottom center;
-            transform: scale(4);
+            transform: scale(var(--hero-dot-scale));
             transform-origin: bottom center;
             image-rendering: pixelated;
             image-rendering: crisp-edges;
             filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.55));
         }
 
-        body.hero-dot-test .sd-fighter--player .sd-hero-dot-lens {
-            position: absolute;
-            inset: 0;
-            overflow: hidden;
+        body.hero-dot-test .sd-fighter--player .sd-pose {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
         }
-        body.hero-dot-test .sd-fighter--player .sd-sprite--hero-dot {
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            width: 25%;
-            height: 25%;
-            margin-left: -12.5%;
-            object-fit: contain;
+        body.hero-dot-test .sd-fighter--player .sd-sprite {
+            position: relative;
+            width: var(--hero-dot-w);
+            height: var(--hero-dot-h);
+            object-fit: fill;
             object-position: bottom center;
-            transform: scale(4);
+            transform: scale(var(--hero-dot-scale));
             transform-origin: bottom center;
             image-rendering: pixelated;
             image-rendering: crisp-edges;
-            filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.5)) brightness(1.04);
-        }
-        body.hero-dot-test .sd-fighter--player .sd-sprite {
-            filter: none;
+            filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.5));
         }
 
         /* 복면 하급무사 아바타 (구형 — 폴백) */

@@ -70,6 +70,9 @@ function pickRighteousSpriteKey(enemy, name) {
 }
 
 function getMotionFrames(spriteKey, isPlayer = true) {
+    if (isPlayer && heroDot.isHeroDotEnabled()) {
+        return heroDot.getHeroDotFrames();
+    }
     const base = isPlayer ? 'assets' : 'assets/other';
     const id = isPlayer ? 'hero' : spriteKey;
     return {
@@ -134,10 +137,7 @@ export function mountBattleSprites(enemy) {
     const enemyEl = document.getElementById('enemy-battle-sd');
     if (playerEl) {
         playerEl.className = 'sd-fighter sd-fighter--player';
-        const playerFrames = getMotionFrames('hero', true);
-        playerEl.innerHTML = heroDot.isHeroDotEnabled()
-            ? heroDot.heroBattleSpriteHtml('idle', playerFrames)
-            : spriteHtml('idle', playerFrames);
+        playerEl.innerHTML = spriteHtml('idle', getMotionFrames('hero', true));
     }
     if (enemyEl) {
         enemySpriteKey = pickEnemySpriteKey(enemy);
@@ -175,6 +175,10 @@ export function playExchangeAnims(playerAction, enemyAction = null) {
     if (enemyAction) {
         window.setTimeout(() => playBattleAnim('enemy', enemyAction), playerAction === 'attack' ? 200 : 0);
     }
+}
+
+export function getHeroAvatarSrc() {
+    return heroDot.isHeroDotEnabled() ? heroDot.HERO_DOT_FRAMES.idle : HERO_FRAMES.idle;
 }
 
 export const HERO_AVATAR_SRC = HERO_FRAMES.idle;

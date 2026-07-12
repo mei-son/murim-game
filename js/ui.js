@@ -990,7 +990,7 @@ export function renderInfoContent() {
 }
 
 function renderHeroAvatar(hero, size = 'md') {
-    const src = battleSd.HERO_AVATAR_SRC;
+    const src = battleSd.getHeroAvatarSrc();
     if (heroDot.isHeroDotEnabled()) {
         return heroDot.heroAvatarHtml(src, hero.subtitle, size);
     }

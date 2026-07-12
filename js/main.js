@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
     events.loadInitialEvents();
     console.log('%c협객의 길 — 사천에서 시작', 'color: #ca8a04; font-weight: bold');
     if (heroDot.isHeroDotEnabled()) {
-        console.log('%c[DOT TEST] 주인공만 픽셀 크러시 적용 · ?heroDot=0 으로 해제', 'color:#86efac;font-weight:bold');
+        console.log('%c[DOT TEST] 주인공 도트 스프라이트 적용 · ?heroDot=0 으로 해제', 'color:#86efac;font-weight:bold');
     }
     if (!debug.isEnabled()) {
         console.log('%c디버그: debugLog.enable() 또는 URL ?debug=1', 'color:#71717a');
