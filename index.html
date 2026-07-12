@@ -52,8 +52,8 @@
             display: flex;
             width: 100%;
         }
-        .battle-log-row--player { justify-content: flex-end; }
-        .battle-log-row--enemy { justify-content: flex-start; }
+        .battle-log-row--player { justify-content: flex-start; }
+        .battle-log-row--enemy { justify-content: flex-end; }
         .battle-log-row--system { justify-content: center; }
         .battle-log-line {
             font-size: 0.8125rem;
@@ -65,12 +65,12 @@
             max-width: 88%;
         }
         .battle-log-row--player .battle-log-line {
-            text-align: right;
-            border-radius: 0.55rem 0.2rem 0.55rem 0.55rem;
-        }
-        .battle-log-row--enemy .battle-log-line {
             text-align: left;
             border-radius: 0.2rem 0.55rem 0.55rem 0.55rem;
+        }
+        .battle-log-row--enemy .battle-log-line {
+            text-align: right;
+            border-radius: 0.55rem 0.2rem 0.55rem 0.55rem;
         }
         .battle-log-row--system .battle-log-line {
             text-align: center;
@@ -99,14 +99,14 @@
             color: #fecaca;
             background: rgba(127, 29, 29, 0.32);
             border: 1px solid rgba(239, 68, 68, 0.35);
-            border-right: 3px solid #ef4444;
+            border-left: 3px solid #ef4444;
             font-weight: 600;
         }
         .battle-log-enemy-atk {
             color: #fed7aa;
             background: rgba(124, 45, 18, 0.28);
             border: 1px solid rgba(249, 115, 22, 0.35);
-            border-left: 3px solid #f97316;
+            border-right: 3px solid #f97316;
             font-weight: 600;
         }
         .battle-log-evade {
@@ -116,11 +116,11 @@
         }
         .battle-log-row--player .battle-log-evade {
             border: 1px solid rgba(34, 211, 238, 0.35);
-            border-right: 3px solid #22d3ee;
+            border-left: 3px solid #22d3ee;
         }
         .battle-log-row--enemy .battle-log-evade {
             border: 1px solid rgba(34, 211, 238, 0.28);
-            border-left: 3px solid #22d3ee;
+            border-right: 3px solid #22d3ee;
             color: #99f6e4;
             background: rgba(19, 78, 74, 0.28);
         }
@@ -130,11 +130,11 @@
         }
         .battle-log-row--player .battle-log-defend {
             border: 1px solid rgba(59, 130, 246, 0.35);
-            border-right: 3px solid #3b82f6;
+            border-left: 3px solid #3b82f6;
         }
         .battle-log-row--enemy .battle-log-defend {
             border: 1px solid rgba(59, 130, 246, 0.28);
-            border-left: 3px solid #3b82f6;
+            border-right: 3px solid #3b82f6;
         }
         .battle-log-victory {
             color: #fde68a;
@@ -153,7 +153,7 @@
             font-style: italic;
             background: rgba(63, 63, 70, 0.35);
             border: 1px solid rgba(161, 161, 170, 0.25);
-            border-right: 3px solid #a1a1aa;
+            border-left: 3px solid #a1a1aa;
         }
         .battle-log-system { color: #a8a29e; font-size: 0.75rem; }
         .battle-action { color: #fef08a; font-weight: 800; }

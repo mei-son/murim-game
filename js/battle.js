@@ -76,8 +76,8 @@ function estimateExchangePresentationMs(playerAction, enemyAction, result) {
     }
     if (result.enemyDamage > 0) {
         ms = Math.max(ms, battleSd.getAnimMs('hit') + 200);
-    } else if (enemyAction === 'attack') {
-        ms = Math.max(ms, battleSd.getAnimMs('attack'));
+    } else if (['attack', 'defend', 'evade'].includes(enemyAction)) {
+        ms = Math.max(ms, battleSd.getAnimMs(enemyAction));
     }
     if (result.playerDamage > 0) {
         ms = Math.max(ms, battleSd.getAnimMs('hit'));
@@ -860,7 +860,29 @@ function playExchangeAnims(playerAction, enemyAction, result) {
     else if (playerAction === 'defend') battleSd.playBattleAnim('player', 'defend');
     else if (playerAction === 'evade') battleSd.playBattleAnim('player', 'evade');
 
-    if (enemyAction === 'attack' || result.enemyDamage > 0) battleSd.playBattleAnim('enemy', result.enemyDamage > 0 ? 'hit' : 'attack');
+    let enemyAnim = null;
+    let enemyOpts = {};
+    if (result.enemyDamage > 0) {
+        if (enemyAction === 'defend') enemyAnim = 'defend';
+        else if (enemyAction === 'attack') {
+            enemyAnim = 'hit';
+            enemyOpts = { pose: 'attack' };
+        } else {
+            enemyAnim = 'hit';
+        }
+    } else if (enemyAction === 'attack') enemyAnim = 'attack';
+    else if (enemyAction === 'defend') enemyAnim = 'defend';
+    else if (enemyAction === 'evade') enemyAnim = 'evade';
+
+    if (enemyAnim) {
+        const enemyDelay = playerAction === 'attack' || playerAction === 'skill' ? 200 : 0;
+        if (enemyDelay) {
+            window.setTimeout(() => battleSd.playBattleAnim('enemy', enemyAnim, enemyOpts), enemyDelay);
+        } else {
+            battleSd.playBattleAnim('enemy', enemyAnim, enemyOpts);
+        }
+    }
+
     if (result.playerDamage > 0) {
         if (playerAction === 'defend') battleSd.playBattleAnim('player', 'defend');
         else if (playerAction === 'attack' || playerAction === 'skill') {
