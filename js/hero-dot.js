@@ -1,5 +1,7 @@
 /** 주인공 완전 도트 스프라이트 — assets/hero-dot/ (scripts/make-hero-dot.py 생성) */
 
+import { HERO_DOT_META } from './hero-dot-meta.js';
+
 export const HERO_DOT_FRAMES = {
     idle: 'assets/hero-dot/hero-idle.png',
     attack: 'assets/hero-dot/hero-attack.png',
@@ -7,9 +9,9 @@ export const HERO_DOT_FRAMES = {
     evade: 'assets/hero-dot/hero-evade.png',
 };
 
-export const HERO_DOT_NATIVE_W = 68;
-export const HERO_DOT_NATIVE_H = 52;
-export const HERO_DOT_DISPLAY_SCALE = 2;
+export const HERO_DOT_NATIVE_W = HERO_DOT_META.nativeW;
+export const HERO_DOT_NATIVE_H = HERO_DOT_META.nativeH;
+export const HERO_DOT_DISPLAY_SCALE = HERO_DOT_META.displayScale;
 
 export const HERO_DOT_ENABLED = (() => {
     try {
