@@ -494,6 +494,75 @@
             margin: 0 auto;
         }
 
+        /* 주인공 도트화 테스트 — nearest-neighbor 픽셀 크러시 (주인공만) */
+        .hero-dot-badge {
+            display: none;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.35rem 0.7rem;
+            border-radius: 9999px;
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            color: #86efac;
+            background: rgba(20, 83, 45, 0.55);
+            border: 1px solid rgba(74, 222, 128, 0.45);
+        }
+        body.hero-dot-test .hero-dot-badge { display: inline-flex; }
+
+        body.hero-dot-test .sd-hero-dot-avatar {
+            display: inline-block;
+            position: relative;
+            width: 5rem;
+            height: 6.5rem;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        body.hero-dot-test .sd-hero-dot-avatar--lg {
+            width: 6.25rem;
+            height: 8.1rem;
+            margin: 0 auto;
+        }
+        body.hero-dot-test .sd-hero-sprite--dot {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 25%;
+            height: 25%;
+            margin-left: -12.5%;
+            object-fit: contain;
+            object-position: bottom center;
+            transform: scale(4);
+            transform-origin: bottom center;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.55));
+        }
+
+        body.hero-dot-test .sd-fighter--player .sd-hero-dot-lens {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+        }
+        body.hero-dot-test .sd-fighter--player .sd-sprite--hero-dot {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 25%;
+            height: 25%;
+            margin-left: -12.5%;
+            object-fit: contain;
+            object-position: bottom center;
+            transform: scale(4);
+            transform-origin: bottom center;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            filter: drop-shadow(2px 2px 0 rgba(0, 0, 0, 0.5)) brightness(1.04);
+        }
+        body.hero-dot-test .sd-fighter--player .sd-sprite {
+            filter: none;
+        }
+
         /* 복면 하급무사 아바타 (구형 — 폴백) */
         .sd-hero-masked {
             width: 80px; height: 80px;
@@ -829,6 +898,7 @@
                 </div>
             </div>
             <div class="flex gap-2 items-center flex-wrap">
+                <span class="hero-dot-badge" title="test/hero-dot 브랜치 — 주인공만 도트 렌더"><i class="fas fa-th"></i> HERO DOT</span>
                 <button id="auto-battle-toggle" type="button" onclick="toggleAutoBattle()" class="auto-battle-toggle auto-on"></button>
                 <button onclick="openInfoModal('character')"
                     class="px-4 py-2 bg-amber-900/60 hover:bg-amber-800/80 border border-amber-600 rounded-xl choice-btn text-sm font-bold">

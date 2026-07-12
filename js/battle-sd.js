@@ -1,5 +1,7 @@
 /** 전투 SD — 주인공(hero-*) · 적(other/*) 모션 PNG */
 
+import * as heroDot from './hero-dot.js';
+
 export const HERO_FRAMES = {
     idle: 'assets/hero-idle.png',
     attack: 'assets/hero-attack.png',
@@ -132,7 +134,10 @@ export function mountBattleSprites(enemy) {
     const enemyEl = document.getElementById('enemy-battle-sd');
     if (playerEl) {
         playerEl.className = 'sd-fighter sd-fighter--player';
-        playerEl.innerHTML = spriteHtml('idle', getMotionFrames('hero', true));
+        const playerFrames = getMotionFrames('hero', true);
+        playerEl.innerHTML = heroDot.isHeroDotEnabled()
+            ? heroDot.heroBattleSpriteHtml('idle', playerFrames)
+            : spriteHtml('idle', playerFrames);
     }
     if (enemyEl) {
         enemySpriteKey = pickEnemySpriteKey(enemy);

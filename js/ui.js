@@ -13,6 +13,8 @@ import * as intel from './intel.js';
 import * as inventory from './inventory.js';
 import * as encounters from './encounters.js';
 import * as stamina from './stamina.js';
+import * as battleSd from './battle-sd.js';
+import * as heroDot from './hero-dot.js';
 
 let infoTab = 'character';
 
@@ -988,8 +990,12 @@ export function renderInfoContent() {
 }
 
 function renderHeroAvatar(hero, size = 'md') {
+    const src = battleSd.HERO_AVATAR_SRC;
+    if (heroDot.isHeroDotEnabled()) {
+        return heroDot.heroAvatarHtml(src, hero.subtitle, size);
+    }
     const cls = size === 'lg' ? 'sd-hero-sprite sd-hero-sprite-lg' : 'sd-hero-sprite';
-    return `<img class="${cls}" src="assets/hero-idle.png" alt="${hero.subtitle}" title="${hero.subtitle}" draggable="false" decoding="async">`;
+    return `<img class="${cls}" src="${src}" alt="${hero.subtitle}" title="${hero.subtitle}" draggable="false" decoding="async">`;
 }
 
 function renderCharacterPanel() {
